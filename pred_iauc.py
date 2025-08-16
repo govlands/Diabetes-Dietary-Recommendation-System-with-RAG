@@ -58,19 +58,25 @@ def perform_grid_search(X, y, cv_folds=5, enable_tabpfn=False, randomized_thresh
     
     # Enlarged CatBoost grid (can be large -> will switch to RandomizedSearchCV if combinations exceed threshold)
     param_grids = {
-        # 'RandomForest': {
-        #     'n_estimators': [100, 200, 500],
-        #     'max_depth': [None, 5, 10, 20],
-        #     'min_samples_split': [2, 5, 10],
-        #     'max_features': ['sqrt', 'log2', 0.3]
-        # },
-        # 'XGBoost': {
-        #     'n_estimators': [100, 200, 500],
-        #     'max_depth': [3, 6, 9],
-        #     'learning_rate': [0.01, 0.05, 0.1, 0.2],
-        #     'subsample': [0.6, 0.8, 1.0],
-        #     'colsample_bytree': [0.6, 0.8, 1.0]
-        # },
+        'RandomForest': {
+            'n_estimators': [100, 200, 500],
+            'max_depth': [None, 5, 10, 20],
+            'min_samples_split': [2, 5, 10],
+            'max_features': ['sqrt', 'log2', 0.3]
+        },
+        'XGBoost': {
+            'n_estimators': [100, 200, 500, 1000],
+            'max_depth': [3, 6, 9, 12],
+            'learning_rate': [0.001, 0.01, 0.03, 0.05, 0.1],
+            'subsample': [0.5, 0.7, 0.8, 1.0],
+            'colsample_bytree': [0.4, 0.6, 0.8, 1.0],
+            'colsample_bylevel': [0.4, 0.6, 0.8, 1.0],
+            'reg_alpha': [0, 0.01, 0.1, 1, 5],
+            'reg_lambda': [0.5, 1, 3, 5, 10],
+            'gamma': [0, 0.1, 1, 5],
+            'min_child_weight': [1, 3, 5, 10],
+            'verbosity': [0]
+        },
         'CatBoost': {
             'iterations': [100, 200, 500, 1000],
             'depth': [4, 6, 8, 10],
@@ -87,16 +93,16 @@ def perform_grid_search(X, y, cv_folds=5, enable_tabpfn=False, randomized_thresh
     
     # Define base models with pipelines
     base_models = {
-        'RandomForest': RandomForestRegressor(random_state=random_seed),
-        'XGBoost': XGBRegressor(random_state=random_seed),
+        'RandomForest': RandomForestRegressor(random_state=42),
+        'XGBoost': XGBRegressor(random_state=42),
         'CatBoost': CatBoostRegressor(
-            random_state=random_seed,
+            random_state=42,
             logging_level="Silent",
             allow_writing_files=False
         )
     }
     if enable_tabpfn:
-        base_models['TabPFN'] = TabPFNRegressor(random_state=random_seed)
+        base_models['TabPFN'] = TabPFNRegressor(random_state=42)
     
     cv = KFold(n_splits=cv_folds, random_state=42, shuffle=True)
     
@@ -111,7 +117,7 @@ def perform_grid_search(X, y, cv_folds=5, enable_tabpfn=False, randomized_thresh
             sizes = [len(v) for v in grid.values() if isinstance(v, (list, tuple, np.ndarray))]
             total_combinations = int(np.prod(sizes)) if sizes else 0
             if total_combinations > randomized_threshold:
-                print(f"Large CatBoost grid detected ({total_combinations} combos). Using RandomizedSearchCV with n_iter={random_search_iters}.")
+                print(f"Large grid detected ({total_combinations} combos). Using RandomizedSearchCV with n_iter={random_search_iters}.")
                 searcher = RandomizedSearchCV(
                     model,
                     param_distributions=grid,
@@ -120,7 +126,7 @@ def perform_grid_search(X, y, cv_folds=5, enable_tabpfn=False, randomized_thresh
                     scoring="neg_mean_absolute_error",
                     n_jobs=-1,
                     verbose=0,
-                    random_state=random_seed
+                    random_state=42
                 )
             else:
                 searcher = GridSearchCV(
@@ -156,18 +162,12 @@ def perform_grid_search(X, y, cv_folds=5, enable_tabpfn=False, randomized_thresh
     
     return optimized_models, cv_scores
 
-if __name__ == "__main__":
-    warnings.filterwarnings("ignore", category=FutureWarning)
-    os.chdir("cgmacros1.0/CGMacros")
-    pd.set_option('display.max_rows', None)
-    random_seed = 42
-    enable_tabpfn = False
-    
+def get_data_all_sub():
     # 构建data_all_sub(训练集)
     if os.path.exists("data_all_sub.csv"):
         data_all_sub = pd.read_csv("data_all_sub.csv")
     else:
-        data_all_sub = pd.DataFrame(columns = ["sub", "Libre GL", "Carb", "Protein", "Fat", "Fiber"])
+        data_all_sub = pd.DataFrame(columns = ["sub", "Libre GL", "Meal Type", "Carb", "Protein", "Fat", "Fiber"])
         hours = 2
         libre_samples = hours * 4 + 1
 
@@ -176,8 +176,8 @@ if __name__ == "__main__":
                 continue
             data = pd.read_csv(os.path.join(sub, sub+'.csv'))
             # print(data)
-            data_sub = pd.DataFrame(columns = ["sub", "Libre GL", "Carb", "Protein", "Fat", "Fiber"])    
-            for index in data[(data["Meal Type"] == "Breakfast") | (data["Meal Type"] == "breakfast")].index:
+            data_sub = pd.DataFrame(columns = ["sub", "Libre GL", "Meal Type", "Carb", "Protein", "Fat", "Fiber"])    
+            for index in data[(data["Meal Type"] == "Breakfast") | (data["Meal Type"] == "breakfast") | (data["Meal Type"] == "Lunch") | (data["Meal Type"] == "lunch") | (data["Meal Type"] == "Dinner") | (data["Meal Type"] == "dinner")].index:
                 data_meal = {}
                 data_meal["sub"] = sub[-3:]
                 data_meal["Libre GL"] = data["Libre GL"][index:index+135:15].to_list()
@@ -190,6 +190,13 @@ if __name__ == "__main__":
                 data_meal["Fat"] = data["Fat"][index] * 9
                 data_meal["Fiber"] = data["Fiber"][index] * 2
                 data_meal["Calories"] = data["Calories"][index]
+                x = data["Meal Type"][index]
+                if x == "Breakfast" or x == "breakfast":
+                    data_meal["Meal Type"] = 1
+                elif x == "lunch" or x == "Lunch":
+                    data_meal["Meal Type"] = 2
+                else:
+                    data_meal["Meal Type"] = 3
                 data_sub = pd.concat([data_sub, pd.DataFrame([data_meal])], ignore_index=True)
             if data_sub["Carb"].iloc[0] == 24 and data_sub["Protein"].iloc[0] == 22 and data_sub["Fat"].iloc[0] == 10.5 and data_sub["Fiber"].iloc[0] == 0.0:
                 data_sub = data_sub.iloc[1:]
@@ -308,120 +315,269 @@ if __name__ == "__main__":
         data_all_sub["Fiber"] = data_all_sub["Fiber"] * 2
         data_all_sub["Net Carb"] = data_all_sub["Carb"] - data_all_sub["Fiber"]
         data_all_sub.to_csv("data_all_sub.csv")
+    return data_all_sub
 
-    X = data_all_sub[['sub', 'Carbs', 'Protein', 'Fat', 'Fiber', 'Baseline_Libre', 'Age', 'Gender', 'BMI', 'A1c', 'HOMA', 'Insulin', 'TG', 'Cholesterol',
-    'HDL', 'Non HDL', 'LDL', 'VLDL', 'CHO/HDL ratio', 'Fasting BG']].iloc[:, 1:]
-    y = data_all_sub['iAUC']
+if __name__ == "__main__":
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    os.chdir("cgmacros1.0/CGMacros")
+    pd.set_option('display.max_rows', None)
+    enable_tabpfn = False
+    
+    data_all_sub = get_data_all_sub()
 
+    # Split data by meal type and train separate models
+    feature_cols = ['Carbs', 'Protein', 'Fat', 'Fiber', 'Baseline_Libre', 'Age', 'Gender', 'BMI', 'A1c', 'HOMA', 'Insulin', 'TG', 'Cholesterol',
+                   'HDL', 'Non HDL', 'LDL', 'VLDL', 'CHO/HDL ratio', 'Fasting BG']
+    
+    meal_type_names = ["Breakfast", "Lunch", "Dinner"]
+    meal_type_values = [1, 2, 3]
+    meal_results = {}
+    
     if enable_tabpfn: init()
-    optimized_models, scores = perform_grid_search(X, y, enable_tabpfn=enable_tabpfn)
+    
+    print(f"\n{'='*60}")
+    print("Training separate models for each meal type")
+    print(f"{'='*60}")
+    
+    # Check meal type distribution
+    meal_type_counts = data_all_sub["Meal Type"].value_counts().sort_index()
+    print("Meal type distribution:")
+    for meal_val, count in meal_type_counts.items():
+        meal_name = ["Breakfast", "Lunch", "Dinner"][int(meal_val) - 1]
+        print(f"  {meal_name} (type {meal_val}): {count} samples")
+    
+    for i, (meal_name, meal_val) in enumerate(zip(meal_type_names, meal_type_values)):
+        print(f"\n{'='*40}")
+        print(f"Processing {meal_name} (meal_type={meal_val})")
+        print(f"{'='*40}")
+        
+        # Filter data for this meal type
+        meal_mask = data_all_sub["Meal Type"] == meal_val
+        X_meal = data_all_sub.loc[meal_mask, feature_cols]
+        y_meal = data_all_sub.loc[meal_mask, 'iAUC']
+        
+        print(f"{meal_name} dataset shape: {X_meal.shape}")
+        
+        if len(X_meal) < 10:  # Skip if too few samples
+            print(f"Warning: Too few samples for {meal_name} ({len(X_meal)}), skipping...")
+            continue
+        
+        # Perform grid search for this meal type
+        optimized_models, scores = perform_grid_search(X_meal, y_meal, enable_tabpfn=enable_tabpfn)
+        meal_results[meal_name] = {
+            'models': optimized_models,
+            'scores': scores,
+            'X': X_meal,
+            'y': y_meal,
+            'mask': meal_mask
+        }
 
-    # 绘制各模型 MAE 折线图，选择最优模型并保存预测结果与散点图
-
-    # 1) 计算每个模型的 MAE（scores 中为 neg_mean_absolute_error）
-    model_names = list(scores.keys())
-    mae_means = []
-    mae_stds = []
-    for name in model_names:
-        s = scores[name]
-        if isinstance(s, dict):
-            # s 是 cv_results_，取 best 的 mean_test_score / std_test_score
-            mean_tests = np.array(s.get("mean_test_score", []))
-            std_tests = np.array(s.get("std_test_score", []))
-            if mean_tests.size > 0:
-                best_idx = int(np.argmax(mean_tests))
-                best_mean = mean_tests[best_idx]
-                best_std = std_tests[best_idx] if std_tests.size > 0 else 0.0
-                mae_means.append(-best_mean)   # 记得 mean_test_score 是 neg_mean_absolute_error
-                mae_stds.append(best_std)
+    # Plot comparison results for all meal types
+    
+    # 1) Create MAE comparison plot across meal types and models
+    fig, axes = plt.subplots(1, len(meal_results), figsize=(15, 5))
+    if len(meal_results) == 1:
+        axes = [axes]
+    
+    all_predictions = []
+    all_ground_truths = []
+    all_colors = []
+    all_meal_labels = []
+    
+    for idx, (meal_name, result) in enumerate(meal_results.items()):
+        scores = result['scores']
+        model_names = list(scores.keys())
+        mae_means = []
+        mae_stds = []
+        
+        # Calculate MAE for each model
+        for name in model_names:
+            s = scores[name]
+            if isinstance(s, dict):
+                mean_tests = np.array(s.get("mean_test_score", []))
+                std_tests = np.array(s.get("std_test_score", []))
+                if mean_tests.size > 0:
+                    best_idx = int(np.argmax(mean_tests))
+                    best_mean = mean_tests[best_idx]
+                    best_std = std_tests[best_idx] if std_tests.size > 0 else 0.0
+                    mae_means.append(-best_mean)
+                    mae_stds.append(best_std)
+                else:
+                    mae_means.append(np.nan)
+                    mae_stds.append(np.nan)
             else:
-                mae_means.append(np.nan)
-                mae_stds.append(np.nan)
+                arr = np.array(s)
+                mae_means.append(-arr.mean())
+                mae_stds.append(arr.std())
+        
+        # Plot MAE comparison for this meal type
+        ax = axes[idx]
+        ax.errorbar(range(len(model_names)), mae_means, yerr=mae_stds, marker='o', linestyle='-', capsize=4)
+        ax.set_xticks(range(len(model_names)))
+        ax.set_xticklabels(model_names, rotation=30)
+        ax.set_ylabel("MAE")
+        ax.set_title(f"{meal_name} Model Comparison")
+        ax.grid(True, alpha=0.3)
+        
+        # Find best model for this meal type
+        best_idx = int(np.argmin(mae_means))
+        best_name = model_names[best_idx]
+        print(f"\nBest model for {meal_name}: {best_name} (MAE={mae_means[best_idx]:.4f} ± {mae_stds[best_idx]:.4f})")
+        
+        # Get best model and make predictions
+        if best_name == "TabPFN":
+            best_model = TabPFNRegressor(random_state=42)
         else:
-            # s 是 cross_val_score 的返回值（array-like），元素为 neg_mean_absolute_error
-            arr = np.array(s)
-            mae_means.append(-arr.mean())
-            mae_stds.append(arr.std())
-
-    plt.figure(figsize=(8,4))
-    plt.errorbar(range(len(model_names)), mae_means, yerr=mae_stds, marker='o', linestyle='-', capsize=4)
-    plt.xticks(range(len(model_names)), model_names, rotation=30)
-    plt.ylabel("MAE")
-    plt.title("Model MAE Comparison (CV)")
+            best_model = result['models'].get(best_name)
+        
+        X_meal = result['X']
+        y_meal = result['y']
+        meal_mask = result['mask']
+        
+        # Train and predict
+        best_model.fit(X_meal.values, y_meal.values)
+        y_pred = best_model.predict(X_meal.values)
+        
+        # Calculate metrics
+        pearson_corr = pearsonr(y_meal.values, y_pred)[0]
+        rmse = root_mean_squared_error(y_meal.values, y_pred)
+        r2 = r2_score(y_meal.values, y_pred)
+        print(f"  Pearson correlation: {pearson_corr:.4f}")
+        print(f"  RMSE: {rmse:.4f}")
+        print(f"  R^2: {r2:.4f}")
+        
+        # Collect data for combined scatter plot
+        all_predictions.extend(y_pred)
+        all_ground_truths.extend(y_meal.values)
+        all_meal_labels.extend([meal_name] * len(y_pred))
+        
+        # Assign colors based on A1c values for this meal type
+        a1c_vals = data_all_sub.loc[meal_mask, "A1c"].values
+        meal_colors = []
+        for v in a1c_vals:
+            if v < 5.7:
+                meal_colors.append("blue")
+            elif 5.7 <= v <= 6.4:
+                meal_colors.append("green")
+            else:
+                meal_colors.append("red")
+        all_colors.extend(meal_colors)
+    
     plt.tight_layout()
-    plt.savefig("model_mae_comparison.png", dpi=150)
+    plt.savefig("meal_type_mae_comparison.png", dpi=150)
     plt.show()
-
-    # 2) 选取 MAE 最低的模型名
-    best_idx = int(np.argmin(mae_means))
-    best_name = model_names[best_idx]
-    print(f"Best model by CV MAE: {best_name} (MAE={mae_means[best_idx]:.4f} ± {mae_stds[best_idx]:.4f})")
-
-    # 3) 获取该模型的 estimator（包含 TabPFN）
-    if best_name == "TabPFN":
-        best_model = TabPFNRegressor(random_state=42)
-    else:
-        # optimized_models 存在 RandomForest, XGBoost, CatBoost
-        best_model = optimized_models.get(best_name)
-        if best_model is None:
-            # 兜底：如果名字不在 optimized_models（不太可能），尝试实例化 by name
-            if best_name == "RandomForest":
-                best_model = RandomForestRegressor(random_state=random_seed)
-            elif best_name == "XGBoost":
-                best_model = XGBRegressor(random_state=random_seed)
-            elif best_name == "CatBoost":
-                best_model = CatBoostRegressor(random_state=random_seed)
-            else:
-                raise ValueError(f"Unknown best model: {best_name}")
-
-    # 4) 训练最佳模型并在整个 X 上预测
-    X_values = X.values
-    y_values = y.values
-    best_model.fit(X_values, y_values)
-    y_pred = best_model.predict(X_values)
-
-    # 5) 根据 A1c 为每个样本分配颜色/健康状态（使用 data_all_sub 中的 A1c 列）
-    a1c_vals = data_all_sub["A1c"].values
-    colors = []
-    status = []
-    for v in a1c_vals:
-        if v < 5.7:
-            colors.append("blue"); status.append("healthy")
-        elif 5.7 <= v <= 6.4:
-            colors.append("green"); status.append("preD")
-        else:
-            colors.append("red"); status.append("T2D")
-    colors = np.array(colors)
-    status = np.array(status)
-
-    # 6) 计算并打印评估指标
-    pearson_corr = pearsonr(y_values, y_pred)[0]
-    rmse = root_mean_squared_error(y_values, y_pred)
-    r2 = r2_score(y_values, y_pred)
-    print(f"Pearson correlation: {pearson_corr:.4f}")
-    print(f"RMSE: {rmse:.4f}")
-    print(f"R^2: {r2:.4f}")
-
-    # 7) 保存预测结果到 iAUC.csv
-    out_df = pd.DataFrame({
-        "ground truth": y_values,
-        "prediction": y_pred,
-        "health status": status
-    })
-    out_df.to_csv("iAUC.csv", index=False)
-    print("Saved predictions to iAUC.csv")
-
-    # 8) 绘制该模型的预测散点图，按健康状态上色
-    plt.figure(figsize=(6,6))
-    for col, lab in [("blue","healthy"), ("green","preD"), ("red","T2D")]:
-        idx = np.where(colors == col)[0]
-        if len(idx) > 0:
-            plt.scatter(y_values[idx], y_pred[idx], c=col, s=10, label=lab)
-
-    plt.ylabel("Predicted iAUC (mg/dl.h)")
+    
+    # 2) Create combined scatter plot for all meal types
+    fig, axes = plt.subplots(1, len(meal_results), figsize=(18, 5))
+    if len(meal_results) == 1:
+        axes = [axes]
+    
+    meal_colors_map = {"Breakfast": "orange", "Lunch": "purple", "Dinner": "brown"}
+    
+    # Individual scatter plots for each meal type
+    for idx, (meal_name, result) in enumerate(meal_results.items()):
+        ax = axes[idx]
+        meal_mask = result['mask']
+        
+        # Get predictions for this meal type
+        start_idx = sum(len(meal_results[m]['y']) for m in list(meal_results.keys())[:idx])
+        end_idx = start_idx + len(result['y'])
+        
+        meal_preds = all_predictions[start_idx:end_idx]
+        meal_truths = all_ground_truths[start_idx:end_idx]
+        meal_colors_health = all_colors[start_idx:end_idx]
+        
+        # Plot by health status
+        for col, lab in [("blue","healthy"), ("green","preD"), ("red","T2D")]:
+            indices = [i for i, c in enumerate(meal_colors_health) if c == col]
+            if indices:
+                meal_pred_subset = [meal_preds[i] for i in indices]
+                meal_truth_subset = [meal_truths[i] for i in indices]
+                ax.scatter(meal_truth_subset, meal_pred_subset, c=col, s=15, label=lab, alpha=0.7)
+        
+        ax.set_xlabel("Ground truth iAUC (mg/dl.h)")
+        ax.set_ylabel("Predicted iAUC (mg/dl.h)")
+        ax.set_title(f"{meal_name} Predictions")
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+        
+        # Add correlation as text
+        corr = pearsonr(meal_truths, meal_preds)[0]
+        ax.text(0.05, 0.95, f'r = {corr:.3f}', transform=ax.transAxes, 
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+    
+    plt.tight_layout()
+    plt.savefig("meal_type_scatter_comparison.png", dpi=150)
+    plt.show()
+    
+    # 3) Create overall combined scatter plot
+    plt.figure(figsize=(10, 8))
+    
+    # Plot by meal type with different markers
+    markers = ['o', 's', '^']
+    for idx, (meal_name, result) in enumerate(meal_results.items()):
+        start_idx = sum(len(meal_results[m]['y']) for m in list(meal_results.keys())[:idx])
+        end_idx = start_idx + len(result['y'])
+        
+        meal_preds = all_predictions[start_idx:end_idx]
+        meal_truths = all_ground_truths[start_idx:end_idx]
+        
+        plt.scatter(meal_truths, meal_preds, 
+                   c=meal_colors_map[meal_name], 
+                   marker=markers[idx], 
+                   s=20, 
+                   label=meal_name, 
+                   alpha=0.7)
+    
     plt.xlabel("Ground truth iAUC (mg/dl.h)")
-    plt.title(f"{best_name} predictions (corr={pearson_corr:.2f})")
-    plt.legend(fontsize=10)
+    plt.ylabel("Predicted iAUC (mg/dl.h)")
+    plt.title("Combined Predictions by Meal Type")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    # Add overall correlation
+    overall_corr = pearsonr(all_ground_truths, all_predictions)[0]
+    plt.text(0.05, 0.95, f'Overall r = {overall_corr:.3f}', 
+             transform=plt.gca().transAxes,
+             bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+    
     plt.tight_layout()
-    plt.savefig("best_model_scatter.png", dpi=150)
+    plt.savefig("combined_meal_type_scatter.png", dpi=150)
     plt.show()
+    
+    # 4) Save results to CSV files
+    for meal_name, result in meal_results.items():
+        meal_mask = result['mask']
+        start_idx = sum(len(meal_results[m]['y']) for m in list(meal_results.keys())[:idx])
+        end_idx = start_idx + len(result['y'])
+        
+        meal_preds = all_predictions[start_idx:end_idx]
+        meal_truths = all_ground_truths[start_idx:end_idx]
+        meal_colors_health = all_colors[start_idx:end_idx]
+        
+        status = []
+        for c in meal_colors_health:
+            if c == "blue":
+                status.append("healthy")
+            elif c == "green":
+                status.append("preD")
+            else:
+                status.append("T2D")
+        
+        out_df = pd.DataFrame({
+            "ground truth": meal_truths,
+            "prediction": meal_preds,
+            "health status": status,
+            "meal_type": meal_name
+        })
+        out_df.to_csv(f"iAUC_{meal_name.lower()}.csv", index=False)
+        print(f"Saved {meal_name} predictions to iAUC_{meal_name.lower()}.csv")
+    
+    # Save combined results
+    combined_df = pd.DataFrame({
+        "ground truth": all_ground_truths,
+        "prediction": all_predictions,
+        "meal_type": all_meal_labels
+    })
+    combined_df.to_csv("iAUC_combined.csv", index=False)
+    print("Saved combined predictions to iAUC_combined.csv")
