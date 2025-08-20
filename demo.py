@@ -108,7 +108,7 @@ if __name__ == "__main__":
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     )
     embeddings = DashScopeEmbeddings(
-        model="text-embedding-v4", dashscope_api_key="sk-9898f5c24a334457a3791842b1e05142"
+        model="text-embedding-v4", dashscope_api_key=os.getenv("DASHSCOPE_API_KEY")
     )
     
     vector_store = construct_vector_store(embeddings)
