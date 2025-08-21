@@ -22,6 +22,7 @@ import warnings
 import numpy as np
 from pred_iauc import get_data_all_sub
 from sklearn.model_selection import train_test_split
+from datetime import datetime
 
 
 if __name__ == "__main__":
@@ -80,7 +81,10 @@ if __name__ == "__main__":
             y_aug = np.concatenate((y_real, y_synth_subset)) if aug_on else y_real
 
             print(f"    Augmented training data shapes: X_aug {X_aug.shape}, y_aug {y_aug.shape}")
-            model = TabPFNRegressor(random_state=seed)
+            # model_name = 'TabPFN'
+            # model = TabPFNRegressor(random_state=seed)
+            model_name = 'CatBoost'
+            model = CatBoostRegressor(random_state=seed, subsample=1.0, rsm=1.0, random_strength=0, learning_rate=0.1, l2_leaf_reg=7, iterations=200, depth=8, border_count=32, bagging_temperature=0, logging_level='Silent')
             print("    Training TabPFNRegressor...")
             model.fit(X_aug, y_aug)
             print("    Training complete. Predicting on test set...")
@@ -173,7 +177,9 @@ if __name__ == "__main__":
     plt.show()
 
     # Optionally save the figure
-    fig.savefig("model_performance_vs_synth_ratio.png", dpi=200)
+    timestamp = datetime.now().strftime("%Y%m%d_%H_%M")
+    filename = f"../../plots/{model_name}_performance_vs_synth_ratio_{timestamp}.png"
+    fig.savefig(filename, dpi=200)
             
 
     # Visualize results
