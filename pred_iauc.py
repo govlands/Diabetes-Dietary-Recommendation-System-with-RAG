@@ -166,7 +166,8 @@ def perform_grid_search(X, y, cv_folds=5, enable_tabpfn=False, randomized_thresh
     
     return optimized_models, cv_scores
 
-def get_data_all_sub():
+def get_data_all_sub(path:str):
+    os.chdir(path=path)
     # 构建data_all_sub(训练集)
     if os.path.exists("data_all_sub.csv"):
         data_all_sub = pd.read_csv("data_all_sub.csv")
@@ -326,12 +327,14 @@ def get_data_all_sub():
 
 if __name__ == "__main__":
     warnings.filterwarnings("ignore", category=FutureWarning)
-    os.chdir("cgmacros1.0/CGMacros")
+    original_dir = os.getcwd()
+    data_dir = original_dir + '/cgmacros1.0/CGMacros'
+    os.chdir(data_dir)
     pd.set_option('display.max_rows', None)
     enable_tabpfn = True
     model_list = ['CatBoost', 'TabPFN']
     
-    data_all_sub = get_data_all_sub()
+    data_all_sub = get_data_all_sub(data_dir)
     groups = data_all_sub['sub'].values
     gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
     train_idx, holdout_idx = next(gss.split(data_all_sub, groups=groups))

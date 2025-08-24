@@ -1,108 +1,37 @@
 from langchain_community.embeddings import DashScopeEmbeddings
-from langchain_core.vectorstores import InMemoryVectorStore
-import glob
-from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.prompts import PromptTemplate
-from langchain_core.documents import Document
-from typing_extensions import List, TypedDict
 from langgraph.graph import START, StateGraph
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 import os
-import pickle
 from openai import OpenAI
-
-def construct_vector_store(embeddings):
-    vector_store_path = "vector_store.pkl"
-    vector_store = InMemoryVectorStore(embeddings)
-    if os.path.exists(vector_store_path):
-        print("检测到本地向量库，正在加载...")
-        with open(vector_store_path, "rb") as f:
-            all_splits, metadatas = pickle.load(f)
-        # 重新构建向量库（DashScopeEmbeddings会自动重新嵌入）
-        batch_size = 10
-        for i in range(0, len(all_splits), batch_size):
-            batch = all_splits[i:i+batch_size]
-            vector_store.add_documents(documents=batch)
-    else:
-        print("未检测到本地向量库，正在分割文档并嵌入...")
-        # file_path = "KB\成人糖尿病食养指南.pdf"
-        # loader = PyPDFLoader(file_path)
-        # docs = loader.load()
-        pdf_files = glob.glob("KB/*.pdf")
-        docs = []
-        for file_path in pdf_files:
-            loader = PyPDFLoader(file_path)
-            docs.extend(loader.load())
-            
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200,
-            add_start_index=True,
-            separators=["\n\n", "。", "，", " ", ",", "."]
-        )
-        all_splits = text_splitter.split_documents(docs)
-        print(f"Split blog post into {len(all_splits)} sub-documents.\n")
-        
-        batch_size = 10
-        for i in range(0, len(all_splits), batch_size):
-            batch = all_splits[i:i+batch_size]
-            vector_store.add_documents(documents=batch)
-            
-        # 保存分割结果和元数据到本地
-        metadatas = [doc.metadata for doc in all_splits]
-        with open(vector_store_path, "wb") as f:
-            pickle.dump((all_splits, metadatas), f)
-            
-    print("向量库加载完成")
-    return vector_store
-
-# 检索与生成
-class State(TypedDict):
-    """
-    将 根据问题检索信息-提示词构建-llm生成 视为一个工作流，State类的对象包含了工作流中每个节点（环节）所需要的全部信息
-    """
-    information: str
-    query: str
-    context: List[Document]
-    answer: str
-    
-def analyze_query(state: State):
-    """
-    根据state中的患者信息（information）生成query
-    """
-    information = state["information"]
-    # 直接用全部信息作为query，最大化召回
-    query = information + " 饮食 营养素 食谱 食用 摄入"
-    return {"query": query}
+from pred_iauc import get_data_all_sub
+from time import time
+import numpy as np
+from utils import *
 
 
-def retrieve(state: State):
-    """
-    检索节点，使用state中的query，得到相关知识（context）
-    """
-    retrieved_docs = vector_store.similarity_search(state["query"])
-    return {"context": retrieved_docs}
+def fetch_infos_from_cgmacros(n_infos:int=1):
+    data_all_sub = get_data_all_sub(data_dir)
+    feature_cols = ['Baseline_Libre', 'Age', 'Gender', 
+                    'BMI', 'A1c', 'HOMA', 'Insulin', 'TG', 'Cholesterol', 'HDL', 'Non HDL', 
+                    'LDL', 'VLDL', 'CHO/HDL ratio', 'Fasting BG']
+    unique_subjects = data_all_sub['sub'].unique()
+    np.random.seed(int(time()))
+    selected_subjects = np.random.choice(unique_subjects, size=n_infos, replace=False)
+    results = []
+    for sub in selected_subjects:
+        sub_info = data_all_sub[
+            (data_all_sub['sub'] == sub)
+        ].iloc[0]
+        patient_info = sub_info[feature_cols].to_dict()
+        info = format_patient_info(patient_info)
+        results.append(info)
+    return results
 
-def generate(state: State):
-    """
-    生成节点，根据state中的information、context和提示词模板生成整个提示词，然后输入llm进行推理
-    """
-    docs_content = ""
-    for i, doc in enumerate(state["context"]):
-        docs_content += f"片段[{i+1}]:{doc.page_content}\n\n"
-    messages = prompt.invoke({"information": state["information"], "context": docs_content}).to_messages()[0].content
-    completion = client.chat.completions.create(
-        model="qwen-plus",
-        messages=[
-            {"role": "system", "content": "你是一位专业的糖尿病营养师。请根据用户提供的患者信息和相关知识，为该患者制定一份个性化的饮食建议。在你的输出结果中，你的建议可以是相关营养素（碳水化合物、脂肪、纤维素等），可以是某种食物的原材料（如大米、玉米、豆腐、青菜、猪肉等），也可以是具体的菜名（如清蒸黄鱼、白灼虾等），根据给定的信息决定；你需要给出具体的食谱以及其中每种食物/营养素的摄入量（克）；你的最终输出必须严格遵循“食物/营养素：摄入量（单位）    注释”的格式，每个建议换行一次。在你的推理过程（不是最终输出）中，你必须显示指出引用了哪个片段，直接在引用处后添加'[i]'即可，其中i是引用的片段序号"},
-            {"role": "user", "content": messages},
-        ],
-        extra_body={"enable_thinking": True},
-    )
-    answer = completion.choices[0].message.reasoning_content + "\n\n" + "-"*80 + "\n\n" + completion.choices[0].message.content
-    return {"answer": answer}
 
 if __name__ == "__main__":
+    original_dir = os.getcwd()
+    data_dir = original_dir + '/cgmacros1.0/CGMacros'
+    
     client = OpenAI(
         api_key=os.getenv("DASHSCOPE_API_KEY"),
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -110,7 +39,6 @@ if __name__ == "__main__":
     embeddings = DashScopeEmbeddings(
         model="text-embedding-v4", dashscope_api_key=os.getenv("DASHSCOPE_API_KEY")
     )
-    
     vector_store = construct_vector_store(embeddings)
     
     # 初始化RAG提示词模板
@@ -121,34 +49,33 @@ if __name__ == "__main__":
     {context}
     """
     prompt = PromptTemplate.from_template(template)
-    # print(f"prompt:{prompt}\n")
-
-    # example_messages = prompt.invoke(
-    #     {"information":"patient's information", "context":"retrieved context"}
-    # ).to_messages()
-    # assert len(example_messages) == 1
-    # print(f"example_messages[0]:{example_messages[0]}\n")
 
     # 将节点连接并生成一个工作流程图
-    graph_builder = StateGraph(State).add_sequence([analyze_query, retrieve, generate]) # 初始化StateGraph对象并加入两个节点
+    # graph_builder = StateGraph(State).add_sequence([analyze_query, retrieve, generate])
+    graph_builder = StateGraph(State).add_sequence([analyze_query, retrieve])
     graph_builder.add_edge(START, "analyze_query") # 添加从START到检索的边
     graph = graph_builder.compile() #生成图像
 
-    # 流式输出，可以看到各个节点执行后的state
-    information = """姓名：张三
-    性别：男
-    年龄：55岁
-    身高：170cm
-    体重：75kg
-    糖尿病类型：2型糖尿病
-    空腹血糖：8.2 mmol/L
-    糖化血红蛋白：7.8%
-    血脂：总胆固醇5.2 mmol/L，甘油三酯2.1 mmol/L
-    并发症：高血压"""
+    information = fetch_infos_from_cgmacros()[0]
+    
+    state = State(
+        information=information,
+        vector_store=vector_store,
+        prompt=prompt,
+        client=client,
+        thinking=False
+    )
 
     # 执行一次完整推理流程，获取最终结果
-    result = graph.invoke({"information": information})
-    # print(result.get("context"))
+    result = graph.invoke(state)
+    
+    print("【病人信息】")
+    print(information)
+    
+    print("【生成的queries】")
+    for query in result.get('queries', []):
+        print(query)
+    print('-' * 40)
 
     # 输出检索到的文档内容（retrieve阶段）
     print("【检索到的相关知识片段】")

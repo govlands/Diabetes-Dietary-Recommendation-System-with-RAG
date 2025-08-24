@@ -1,2 +1,7 @@
 *.pkl
 cgmacros1.0/*
+catboost_info/*
+__pycache__/*
+KB/*
+models/*
+plots/*

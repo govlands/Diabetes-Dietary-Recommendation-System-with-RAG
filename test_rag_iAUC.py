@@ -22,111 +22,9 @@ from typing_extensions import List, TypedDict
 from langgraph.graph import START, StateGraph
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from time import time
+import datetime
 from matplotlib import font_manager, rcParams
-
-
-def construct_vector_store(embeddings):
-    """构建向量数据库"""
-    vector_store_path = "vector_store.pkl"
-    vector_store = InMemoryVectorStore(embeddings)
-    if os.path.exists(vector_store_path):
-        print("检测到本地向量库，正在加载...")
-        with open(vector_store_path, "rb") as f:
-            all_splits, metadatas = pickle.load(f)
-        # 重新构建向量库
-        batch_size = 10
-        for i in range(0, len(all_splits), batch_size):
-            batch = all_splits[i:i+batch_size]
-            vector_store.add_documents(documents=batch)
-    else:
-        print("未检测到本地向量库，正在分割文档并嵌入...")
-        pdf_files = glob.glob("KB/*.pdf")
-        docs = []
-        for file_path in pdf_files:
-            loader = PyPDFLoader(file_path)
-            docs.extend(loader.load())
-            
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200,
-            add_start_index=True,
-            separators=["\n\n", "。", "，", " ", ",", "."]
-        )
-        all_splits = text_splitter.split_documents(docs)
-        print(f"Split documents into {len(all_splits)} sub-documents.")
-        
-        batch_size = 10
-        for i in range(0, len(all_splits), batch_size):
-            batch = all_splits[i:i+batch_size]
-            vector_store.add_documents(documents=batch)
-            
-        # 保存分割结果和元数据到本地
-        metadatas = [doc.metadata for doc in all_splits]
-        with open(vector_store_path, "wb") as f:
-            pickle.dump((all_splits, metadatas), f)
-            
-    print("向量库加载完成")
-    return vector_store
-
-
-class State(TypedDict):
-    """RAG 工作流状态"""
-    information: str
-    query: str
-    context: List[Document]
-    answer: str
-
-
-def analyze_query(state: State):
-    """分析查询"""
-    information = state["information"]
-    query = information + " 早餐 午餐 晚餐 碳水化合物 蛋白质 脂肪 纤维素 摄入量"
-    return {"query": query}
-
-
-def retrieve(state: State):
-    """检索相关文档"""
-    retrieved_docs = vector_store.similarity_search(state["query"])
-    return {"context": retrieved_docs}
-
-
-def generate(state: State):
-    """生成营养建议"""
-    docs_content = ""
-    for i, doc in enumerate(state["context"]):
-        docs_content += f"片段[{i+1}]:{doc.page_content}\n\n"
-    messages = prompt.invoke({"information": state["information"], "context": docs_content}).to_messages()[0].content
-    completion = client.chat.completions.create(
-        model="qwen-plus",
-        messages=[
-            {"role": "system", "content": """你是一位专业的糖尿病营养师。请根据用户提供的患者信息和相关知识，为该患者制定一份个性化的饮食建议。
-
-重要：你必须严格按照以下格式输出，每餐分别给出碳水化合物、蛋白质、脂肪、纤维素的摄入量（单位：克）：
-
-早餐：
-碳水化合物：XX克
-蛋白质：XX克  
-脂肪：XX克
-纤维素：XX克
-
-午餐：
-碳水化合物：XX克
-蛋白质：XX克
-脂肪：XX克
-纤维素：XX克
-
-晚餐：
-碳水化合物：XX克
-蛋白质：XX克
-脂肪：XX克
-纤维素：XX克
-
-请确保数值合理，适合糖尿病患者的营养需求。"""},
-            {"role": "user", "content": messages},
-        ],
-    )
-    answer = completion.choices[0].message.content
-    return {"answer": answer}
+from utils import *
 
 
 def generate_llm_only(patient_info):
@@ -204,88 +102,13 @@ def parse_nutrition_output(text):
     return meals
 
 
-def format_patient_info(patient_data):
-    """格式化患者信息为文本"""
-    gender_map = {1: "男", -1: "女"}
-    gender = gender_map.get(patient_data['Gender'], "未知")
-    
-    info = f"""
-    年龄：{patient_data['Age']}岁
-    性别：{gender}
-    BMI：{patient_data['BMI']:.1f}
-    空腹血糖基线：{patient_data['Baseline_Libre']:.1f} mg/dL
-    糖化血红蛋白：{patient_data['A1c']:.1f}%
-    HOMA指数：{patient_data['HOMA']:.2f}
-    空腹胰岛素：{patient_data['Insulin']:.1f} μIU/mL
-    甘油三酯：{patient_data['TG']:.1f} mg/dL
-    总胆固醇：{patient_data['Cholesterol']:.1f} mg/dL
-    高密度脂蛋白：{patient_data['HDL']:.1f} mg/dL
-    非高密度脂蛋白：{patient_data['Non HDL']:.1f} mg/dL
-    低密度脂蛋白：{patient_data['LDL']:.1f} mg/dL
-    极低密度脂蛋白：{patient_data['VLDL']:.1f} mg/dL
-    胆固醇/HDL比值：{patient_data['CHO/HDL ratio']:.2f}
-    空腹血糖：{patient_data['Fasting BG']:.1f} mg/dL
-    """
-    return info
-
-
-# def predict_iauc_for_meal(training_data, patient_data, nutrition_values, debug=False):
-#     """
-#     使用训练好的模型预测iAUC - 每次创建新的模型实例以避免缓存问题
-#     training_data: (X_train, y_train) 训练数据
-#     nutrition_values: {'碳水化合物': xx, '蛋白质': xx, '脂肪': xx, '纤维素': xx}
-#     """
-#     X_train, y_train = training_data
-    
-#     # 构建完整特征向量
-#     feature_vector = []
-    
-#     # 营养素特征（需要乘以转换系数）
-#     carbs = nutrition_values['碳水化合物'] * 4
-#     protein = nutrition_values['蛋白质'] * 4  
-#     fat = nutrition_values['脂肪'] * 9
-#     fiber = nutrition_values['纤维素'] * 2
-    
-#     feature_vector.extend([carbs, protein, fat, fiber])
-    
-#     # 患者基础信息特征
-#     patient_features = ['Baseline_Libre', 'Age', 'Gender', 'BMI', 'A1c', 'HOMA', 
-#                        'Insulin', 'TG', 'Cholesterol', 'HDL', 'Non HDL', 'LDL', 
-#                        'VLDL', 'CHO/HDL ratio', 'Fasting BG']
-    
-#     for feature in patient_features:
-#         feature_vector.append(patient_data[feature])
-    
-#     # 转换为DataFrame格式（TabPFN需要）
-#     feature_names = ['Carbs', 'Protein', 'Fat', 'Fiber'] + patient_features
-#     X = np.array(feature_vector, dtype=np.float64).reshape(1, -1)
-#     X_df = pd.DataFrame(X, columns=feature_names)
-    
-#     if debug:
-#         print(f"    营养素: Carbs={carbs:.0f}, Protein={protein:.0f}, Fat={fat:.0f}, Fiber={fiber:.0f}")
-#         print(f"    完整特征向量前4个: {feature_vector[:4]}")
-    
-#     # 创建新的模型实例并训练 - 避免缓存问题
-#     import random
-#     random_seed = int(time())
-#     model = TabPFNRegressor(random_state=random_seed)
-#     model.fit(X_train, y_train)
-    
-#     # 预测
-#     pred_iauc = model.predict(X_df)[0]
-    
-#     if debug:
-#         print(f"    使用随机种子: {random_seed}")
-#         print(f"    预测结果: {pred_iauc:.2f}")
-    
-#     return pred_iauc
-
-def predict_iauc_for_meal(model, patient_data, nutrition_values, debug=False):
+def predict_iauc_for_meal(training_data, patient_data, nutrition_values, debug=False):
     """
     使用训练好的模型预测iAUC - 每次创建新的模型实例以避免缓存问题
     training_data: (X_train, y_train) 训练数据
     nutrition_values: {'碳水化合物': xx, '蛋白质': xx, '脂肪': xx, '纤维素': xx}
     """
+    X_train, y_train = training_data
     
     # 构建完整特征向量
     feature_vector = []
@@ -315,7 +138,10 @@ def predict_iauc_for_meal(model, patient_data, nutrition_values, debug=False):
         print(f"    营养素: Carbs={carbs:.0f}, Protein={protein:.0f}, Fat={fat:.0f}, Fiber={fiber:.0f}")
         print(f"    完整特征向量前4个: {feature_vector[:4]}")
     
+    # 创建新的模型实例并训练 - 避免缓存问题
     random_seed = int(time())
+    model = TabPFNRegressor(random_state=random_seed)
+    model.fit(X_train, y_train)
     
     # 预测
     pred_iauc = model.predict(X_df)[0]
@@ -325,6 +151,48 @@ def predict_iauc_for_meal(model, patient_data, nutrition_values, debug=False):
         print(f"    预测结果: {pred_iauc:.2f}")
     
     return pred_iauc
+
+# def predict_iauc_for_meal(model, patient_data, nutrition_values, debug=False):
+#     """
+#     使用训练好的模型预测iAUC
+#     training_data: (X_train, y_train) 训练数据
+#     nutrition_values: {'碳水化合物': xx, '蛋白质': xx, '脂肪': xx, '纤维素': xx}
+#     """
+    
+#     # 构建完整特征向量
+#     feature_vector = []
+    
+#     # 营养素特征（需要乘以转换系数）
+#     carbs = nutrition_values['碳水化合物'] * 4
+#     protein = nutrition_values['蛋白质'] * 4  
+#     fat = nutrition_values['脂肪'] * 9
+#     fiber = nutrition_values['纤维素'] * 2
+    
+#     feature_vector.extend([carbs, protein, fat, fiber])
+    
+#     # 患者基础信息特征
+#     patient_features = ['Baseline_Libre', 'Age', 'Gender', 'BMI', 'A1c', 'HOMA', 
+#                        'Insulin', 'TG', 'Cholesterol', 'HDL', 'Non HDL', 'LDL', 
+#                        'VLDL', 'CHO/HDL ratio', 'Fasting BG']
+#     feature_names = ['Carbs', 'Protein', 'Fat', 'Fiber'] + patient_features
+#     feature_vector = [carbs, protein, fat, fiber] + [float(patient_data[f]) for f in patient_features]
+#     X_np = np.asarray(feature_vector, dtype=np.float64).reshape(1, -1)
+    
+#     if debug:
+#         print(f"    营养素: Carbs={carbs:.0f}, Protein={protein:.0f}, Fat={fat:.0f}, Fiber={fiber:.0f}")
+#         print(f"    完整特征向量: {feature_vector}")
+    
+#     random_seed = int(time())
+#     pred_iauc = model.predict(X_np)
+#     pred_batch = model.predict(np.vstack([X_np, X_np]))  # 同样样本两次，返回长度应该=2
+
+#     if debug:
+#         print(f"    pred_single: {pred_iauc}")
+#         print(f"    pred_batch: {pred_batch}")
+#         print(f"    使用随机种子: {random_seed}")
+#         print(f"    预测结果: {pred_iauc}")
+    
+#     return pred_iauc[0]
 
 def setup_matplotlib_chinese():
     candidates = [
@@ -372,7 +240,9 @@ def main():
     
     # 切换到数据目录
     original_dir = os.getcwd()
-    os.chdir("cgmacros1.0/CGMacros")
+    data_dir = original_dir + '/cgmacros1.0/CGMacros'
+    os.chdir(data_dir)
+    n_patients = 5
     
     try:
         # 初始化TabPFN
@@ -380,7 +250,7 @@ def main():
         
         # 加载数据
         print("加载数据...")
-        data_all_sub = get_data_all_sub()
+        data_all_sub = get_data_all_sub(data_dir)
         
         # 定义特征列
         feature_cols = ['Carbs', 'Protein', 'Fat', 'Fiber', 'Baseline_Libre', 'Age', 'Gender', 
@@ -391,13 +261,13 @@ def main():
         print("\n1. 训练早餐预测模型...")
         breakfast_mask = data_all_sub["Meal Type"] == 1
         X_breakfast = data_all_sub.loc[breakfast_mask, feature_cols]  # 保持DataFrame格式
-        y_breakfast = data_all_sub.loc[breakfast_mask, 'iAUC'].values
+        y_breakfast = data_all_sub.loc[breakfast_mask, 'iAUC']
         
         print(f"早餐数据集大小: {X_breakfast.shape}")
         
-        # 训练TabPFN模型（使用DataFrame）
-        breakfast_model = TabPFNRegressor(random_state=42)
-        breakfast_model.fit(X_breakfast, y_breakfast)
+        # 训练TabPFN模型
+        # breakfast_model = TabPFNRegressor(random_state=42)
+        # breakfast_model.fit(X_breakfast, y_breakfast)
         print("早餐预测模型训练完成!")
         
         # 切换回原目录以访问KB和其他文件
@@ -436,11 +306,11 @@ def main():
         # 切换回数据目录
         os.chdir("cgmacros1.0/CGMacros")
         
-        # 3. 测试：随机选择3个不同受试者的早餐样本
+        # 3. 测试：随机选择n_patients个不同受试者的早餐样本
         print("\n3. 开始测试...")
         unique_subjects = data_all_sub['sub'].unique()
         np.random.seed(int(time()))
-        selected_subjects = np.random.choice(unique_subjects, size=3, replace=False)
+        selected_subjects = np.random.choice(unique_subjects, size=n_patients, replace=False)
         
         results = []
         
@@ -467,7 +337,14 @@ def main():
             
             # RAG预测
             print("使用RAG预测营养素...")
-            rag_result = graph.invoke({"information": patient_info_text})
+            state = State(
+                information=patient_info_text,
+                vector_store=vector_store,
+                prompt=prompt,
+                client=client,
+                thinking=True
+            )
+            rag_result = graph.invoke(state)
             rag_nutrition = parse_nutrition_output(rag_result.get("answer", ""))
             print(f"RAG预测结果: {rag_nutrition}")
             
@@ -482,11 +359,11 @@ def main():
             
             # 使用模型预测iAUC
             print("RAG营养素预测:")
-            # rag_pred_iauc = predict_iauc_for_meal((X_breakfast, y_breakfast), patient_data, rag_nutrition['早餐'], debug=True)
-            rag_pred_iauc = predict_iauc_for_meal(breakfast_model, patient_data, rag_nutrition['早餐'], debug=True)
+            rag_pred_iauc = predict_iauc_for_meal((X_breakfast, y_breakfast), patient_data, rag_nutrition['早餐'], debug=True)
+            # rag_pred_iauc = predict_iauc_for_meal(breakfast_model, patient_data, rag_nutrition['早餐'], debug=True)
             print("LLM营养素预测:")
-            # llm_pred_iauc = predict_iauc_for_meal((X_breakfast, y_breakfast), patient_data, llm_nutrition['早餐'], debug=True)
-            llm_pred_iauc = predict_iauc_for_meal(breakfast_model, patient_data, llm_nutrition['早餐'], debug=True)
+            llm_pred_iauc = predict_iauc_for_meal((X_breakfast, y_breakfast), patient_data, llm_nutrition['早餐'], debug=True)
+            # llm_pred_iauc = predict_iauc_for_meal(breakfast_model, patient_data, llm_nutrition['早餐'], debug=True)
             true_iauc = subject_breakfast['iAUC']
             
             print(f"RAG干涉后预测iAUC: {rag_pred_iauc:.2f}")
@@ -510,45 +387,31 @@ def main():
         llm_preds = [r['llm_pred'] for r in results]
         true_values = [r['true_iauc'] for r in results]
         
-        # 创建对比图
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+        # 只展示柱状图对比
+        fig, ax = plt.subplots(1, 1, figsize=(12, 6))
         
-        # 柱状图对比
         x = np.arange(len(subjects))
         width = 0.25
         
-        ax1.bar(x - width, rag_preds, width, label='RAG预测', alpha=0.8)
-        ax1.bar(x, llm_preds, width, label='LLM预测', alpha=0.8)
-        ax1.bar(x + width, true_values, width, label='真实值', alpha=0.8)
+        ax.bar(x - width, rag_preds, width, label='RAG预测', alpha=0.8)
+        ax.bar(x, llm_preds, width, label='LLM预测', alpha=0.8)
+        ax.bar(x + width, true_values, width, label='真实值', alpha=0.8)
         
-        ax1.set_xlabel('受试者')
-        ax1.set_ylabel('iAUC')
-        ax1.set_title('iAUC预测对比')
-        ax1.set_xticks(x)
-        ax1.set_xticklabels(subjects)
-        ax1.legend()
-        ax1.grid(True, alpha=0.3)
-        
-        # 散点图对比
-        ax2.scatter(true_values, rag_preds, label='RAG vs 无干涉', s=100, alpha=0.7)
-        ax2.scatter(true_values, llm_preds, label='LLM vs 无干涉', s=100, alpha=0.7)
-        
-        # 添加y=x线
-        min_val = min(min(true_values), min(rag_preds), min(llm_preds))
-        max_val = max(max(true_values), max(rag_preds), max(llm_preds))
-        ax2.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5, label='理想预测线')
-        
-        ax2.set_xlabel('无干涉iAUC')
-        ax2.set_ylabel('预测iAUC')
-        ax2.set_title('预测准确性对比')
-        ax2.legend()
-        ax2.grid(True, alpha=0.3)
+        ax.set_xlabel('受试者')
+        ax.set_ylabel('iAUC')
+        ax.set_title('iAUC预测对比（仅柱状图）')
+        ax.set_xticks(x)
+        ax.set_xticklabels(subjects, rotation=0)
+        ax.legend()
+        ax.grid(True, alpha=0.3)
         
         plt.tight_layout()
         plt.show()
         
         # 保存结果
-        plt.savefig('../../plots/rag_vs_llm_iauc_prediction.png', dpi=300, bbox_inches='tight')
+        os.chdir(original_dir)
+        timestamp = datetime.now().strftime("%Y%m%d_%H_%M")
+        plt.savefig(f'plots/rag_vs_llm_iauc_prediction_{timestamp}.png', dpi=300, bbox_inches='tight')
         
         # 5. 计算评估指标
         print("\n5. 评估指标:")
