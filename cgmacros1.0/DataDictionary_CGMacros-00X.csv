@@ -1,0 +1,15 @@
+﻿Field,Range,Description
+Timestamp,Date: Month/Day/Year HH:MM,Randomly shifted time stamps for days in the study that provide the incremental time stamp the CGM readings occurred
+Libre GL,Numeric: 40-400 mg/dL,The blood glucose reading provided by the Libre Pro sensor - with a minimum possible value of 40 and maximum possible value of 400
+Dexcom GL,Numeric: 40-400 mg/dL,The blood glucose reading provided by the Dexcom G6 Pro sensor - with a minimum possible value of 40 and maximum possible value of 400
+HR,Numeric: 30-176,average heart rate over the last minute provided by the FitBit Sense Smartwatch in beats per minute
+Calories (Activity),Numeric: 0-16.178,Fitbit estimate of calories burned in the past minute as captured by the FitBit Sense Smartwatch 
+Mets,Numeric: 10-176,The Metabolic Equivalent of Task estimate for the past minute as provided by the FitBIt Sense multiplied by 10
+Meal Type,"Factor: Breakfast, Lunch, Dinner",The indication of a meal start and which meal
+Calories,Numeric: 30-1180,Calories (estimated) in the consumed meal
+Carbs,Numeric: 0-176,Estimate of carbohydrate quantity (grams) in the consumed meal
+Protein,Numeric: 3-176,Estimate of protein quantity (grams) in the consumed meal
+Fat,Numeric: 0-176,Estimate of fat quantity (grams) in the consumed meal
+Fiber,Numeric: 0-176,Estimate of fiber  quantity (grams) in the consumed meal
+Amount Consumed,numeric: 0-100,Estimate of % of meal consumed
+Image Path,Path to the specific meal in folder structure,indicates where the photo associated with the start or end of this meal is located in the dataset

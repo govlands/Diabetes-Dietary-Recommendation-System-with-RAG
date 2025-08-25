@@ -1,0 +1,23 @@
+﻿Field,Value,Description (from Viome)
+Gut Lining Health,"Factor: 1 = Not Optimal, 2 = Average, 3 = Good",This score focuses on your gut lining (or intestinal barrier) and the health of the mucosal layer that protects it.
+LPS Biosynthesis Pathways,"Factor: 1 = Not Optimal, 2 = Average, 3 = Good",This score assesses the levels of activity of all microbial pathways leading to the production of LPS (lipopolysaccharides) in your gut.
+"Biofilm, Chemotaxis, and Virulence Pathways","Factor: 1 = Not Optimal, 2 = Average, 3 = Good",This score assesses the levels of all activity of all metabolic pathways that suggest a pro-inflammatory or hostile environment in the gut.
+TMA Production Pathways,"Factor: 1 = Not Optimal, 2 = Average, 3 = Good",This score assesses microbial activities in the gut that result in the production of TMA (trimethylamine).
+Ammonia Production Pathways,"Factor: 1 = Not Optimal, 2 = Average, 3 = Good",This score assesses the levels of activity of all microbial pathways that are associated with the production of ammonia. 
+Metabolic Fitness,"Factor: 1 = Not Optimal, 2 = Average, 3 = Good","This score represents active microbial organisms and functions that are associated with your blood sugar, insulin resistance, or weight control."
+Active Microbial Diversity,"Factor: 1 = Not Optimal, 2 = Average, 3 = Good",This score is your percentile for the total count of active microbial species detected and sequenced from your stool sample.
+Butyrate Production Pathways,"Factor: 1 = Not Optimal, 2 = Average, 3 = Good",This score assesses the levels of activity of all microbial pathways that lead to the production of a beneficial nutrient - butyrate.
+Flagellar Assembly Pathways,"Factor: 1 = Not Optimal, 2 = Average, 3 = Good",This score assesses microbial activities related to the production of flagella.
+Putrescine Production Pathways,"Factor: 1 = Not Optimal, 2 = Average, 3 = Good",This score assesses the levels of activity of all microbial pathways that lead to putrescine production.
+Uric Acid Production Pathways,"Factor: 1 = Not Optimal, 2 = Average, 3 = Good",This score assesses the level of activity of microbial pathways that lead to the production and degradation of uric acid (or urate) in the gut.
+Bile Acid Metabolism Pathways,"Factor: 1 = Not Optimal, 2 = Average, 3 = Good",This score assesses the levels of activity of gut microbial pathways involved in the metabolism of bile acids.
+Inflammatory Activity,"Factor: 1 = Not Optimal, 2 = Average, 3 = Good",This score measures the activities of your microbes that can contribute to or reflect inflammation in your gut environment.
+Gut Microbiome Health,"Factor: 1 = Not Optimal, 2 = Average, 3 = Good",Your gut microbiome is home to trillions of microbes that have a direct influence on everything from how you digest foods to how your immune system responds to infections or allergens.
+Digestive Efficiency,"Factor: 1 = Not Optimal, 2 = Average, 3 = Good",This score is a comprehensive microbial reflection of your gastrointestinal (GI) tract functions. 
+Protein Fermentation,"Factor: 1 = Not Optimal, 2 = Average, 3 = Good",This score reflects whether or not you are digesting your proteins properly.
+Gas Production,"Factor: 1 = Not Optimal, 2 = Average, 3 = Good",This score is an assessment of your overall gas production activity by the microbes in your gut.
+Methane Gas Production Pathways,"Factor: 1 = Not Optimal, 2 = Average, 3 = Good",This score assesses the level of activity of microbial pathways that result in the production of methane gas in the gut.
+Sulfide Gas Production Pathways,"Factor: 1 = Not Optimal, 2 = Average, 3 = Good",This score assesses the levels of activity of all microbial pathways that result in the production of hydrogen sulfide gas.
+Oxalate Metabolism Pathways,"Factor: 1 = Not Optimal, 2 = Average, 3 = Good",This score assesses the level of activity of gut microbial pathways needed to break down or metabolize oxalates.
+Salt Stress Pathways,"Factor: 1 = Not Optimal, 2 = Average, 3 = Good",This score assesses the levels of activity of all microbial pathways that signal excessive salt in the gut environment.
+Microbiome-Induced Stress,"Factor: 1 = Not Optimal, 2 = Average, 3 = Good","Your Microbiome-Induced Stress score offers insights about those microbial activities that can lead to stress or inflammatory response not only in your gut, but also in your body. "

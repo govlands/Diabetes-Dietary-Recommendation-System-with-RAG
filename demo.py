@@ -33,8 +33,8 @@ if __name__ == "__main__":
     data_dir = original_dir + '/cgmacros1.0/CGMacros'
     
     client = OpenAI(
-        api_key=os.getenv("DASHSCOPE_API_KEY"),
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        api_key=os.getenv("DEEPSEEK_API_KEY"),
+        base_url="https://api.deepseek.com",
     )
     embeddings = DashScopeEmbeddings(
         model="text-embedding-v4", dashscope_api_key=os.getenv("DASHSCOPE_API_KEY")
@@ -51,8 +51,8 @@ if __name__ == "__main__":
     prompt = PromptTemplate.from_template(template)
 
     # 将节点连接并生成一个工作流程图
-    # graph_builder = StateGraph(State).add_sequence([analyze_query, retrieve, generate])
-    graph_builder = StateGraph(State).add_sequence([analyze_query, retrieve])
+    graph_builder = StateGraph(State).add_sequence([analyze_query, retrieve, generate])
+    # graph_builder = StateGraph(State).add_sequence([analyze_query, retrieve])
     graph_builder.add_edge(START, "analyze_query") # 添加从START到检索的边
     graph = graph_builder.compile() #生成图像
 
@@ -63,7 +63,7 @@ if __name__ == "__main__":
         vector_store=vector_store,
         prompt=prompt,
         client=client,
-        thinking=False
+        thinking=True
     )
 
     # 执行一次完整推理流程，获取最终结果
@@ -80,7 +80,8 @@ if __name__ == "__main__":
     # 输出检索到的文档内容（retrieve阶段）
     print("【检索到的相关知识片段】")
     for i, doc in enumerate(result.get("context", [])):
-        print(f"\n片段{i+1}：{doc.metadata['source']}\t 第{doc.metadata['page']}页")
+        # print(doc)
+        print(f"\n片段{i+1}：{doc.metadata['source']}")
         print(doc.page_content)
         print("-" * 40)
 
