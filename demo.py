@@ -3,7 +3,6 @@ from langchain_core.prompts import PromptTemplate
 from langgraph.graph import START, StateGraph
 import os
 from openai import OpenAI
-from pred_iauc import get_data_all_sub
 from time import time
 import numpy as np
 from utils import *
@@ -11,7 +10,7 @@ from utils import *
 
 def fetch_infos_from_cgmacros(n_infos:int=1):
     data_all_sub = get_data_all_sub(data_dir)
-    feature_cols = ['Baseline_Libre', 'Age', 'Gender', 
+    feature_cols = ['Baseline_Libre', 'Age', 'Weight', 'Height', 'Gender', 
                     'BMI', 'A1c', 'HOMA', 'Insulin', 'TG', 'Cholesterol', 'HDL', 'Non HDL', 
                     'LDL', 'VLDL', 'CHO/HDL ratio', 'Fasting BG']
     unique_subjects = data_all_sub['sub'].unique()
@@ -31,6 +30,11 @@ def fetch_infos_from_cgmacros(n_infos:int=1):
 if __name__ == "__main__":
     original_dir = os.getcwd()
     data_dir = original_dir + '/cgmacros1.0/CGMacros'
+    
+    information = fetch_infos_from_cgmacros()[0]
+    print("【病人信息】")
+    print(information)
+    os.chdir(original_dir)
     
     client = OpenAI(
         api_key=os.getenv("DEEPSEEK_API_KEY"),
@@ -55,8 +59,7 @@ if __name__ == "__main__":
     # graph_builder = StateGraph(State).add_sequence([analyze_query, retrieve])
     graph_builder.add_edge(START, "analyze_query") # 添加从START到检索的边
     graph = graph_builder.compile() #生成图像
-
-    information = fetch_infos_from_cgmacros()[0]
+    
     
     state = State(
         information=information,
@@ -68,9 +71,6 @@ if __name__ == "__main__":
 
     # 执行一次完整推理流程，获取最终结果
     result = graph.invoke(state)
-    
-    print("【病人信息】")
-    print(information)
     
     print("【生成的queries】")
     for query in result.get('queries', []):

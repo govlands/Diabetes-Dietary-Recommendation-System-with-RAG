@@ -16,6 +16,205 @@ from qdrant_client.http.models import VectorParams
 from time import sleep
 import requests
 from typing import Optional
+import numpy as np
+import pandas as pd
+
+def areaUnderCurve(a, b):
+    total = 0
+    temp = 0
+    for i in range(len(a)-1):
+        if (b[i+1]-b[0]>=0) and (b[i]-b[0]>=0):
+            temp = ((b[i]-b[0]+b[i+1]-b[0])/2)*(a[i+1]-a[i])
+        elif (b[i+1]-b[0] < 0) and (b[i]-b[0] >= 0):
+            temp = (b[i]-b[0])*((b[i]-b[0])/(b[i]-b[i+1])*(a[i+1]-a[i])/2)
+        elif (b[i+1]-b[0] >= 0) and (b[i]-b[0] < 0):
+            temp = (b[i+1]-b[0])*((b[i+1]-b[0])/(b[i+1]-b[i])*(a[i+1]-a[i])/2)
+        elif (b[i]-b[0] < 0) and (b[i+1]-b[0] < 0):
+            temp = 0
+        total = total + temp
+    return total
+
+def calc_iauc(cgm, sampling_interval):
+    a = []
+    for i in range(len(cgm)):
+        a.append(i * sampling_interval[i])
+    return areaUnderCurve(a, cgm)
+
+def calc_auc(cgm, sampling_interval):
+    return np.trapz(cgm, dx=sampling_interval)
+
+def get_data_all_sub(path:str):
+    os.chdir(path=path)
+    # 构建data_all_sub(训练集)
+    if os.path.exists("data_all_sub.csv"):
+        data_all_sub = pd.read_csv("data_all_sub.csv")
+    else:
+        data_all_sub = pd.DataFrame(columns = ["sub", "Libre GL", "Meal Type", "Carb", "Protein", "Fat", "Fiber"])
+        hours = 2
+        libre_samples = hours * 4 + 1
+
+        for sub in sorted(os.listdir(".")):
+            if sub[:8] != "CGMacros":
+                continue
+            data = pd.read_csv(os.path.join(sub, sub+'.csv'))
+            # print(data)
+            data_sub = pd.DataFrame(columns = ["sub", "Libre GL", "Meal Type", "Carb", "Protein", "Fat", "Fiber"])    
+            for index in data[(data["Meal Type"] == "Breakfast") | (data["Meal Type"] == "breakfast") | (data["Meal Type"] == "Lunch") | (data["Meal Type"] == "lunch") | (data["Meal Type"] == "Dinner") | (data["Meal Type"] == "dinner")].index:
+                data_meal = {}
+                data_meal["sub"] = sub[-3:]
+                data_meal["Libre GL"] = data["Libre GL"][index:index+135:15].to_list()
+                if len(data_meal["Libre GL"]) < 9:
+                    continue
+                data_meal["iAUC"] = calc_iauc(data_meal["Libre GL"], [15 for i in range(libre_samples)])
+                data_meal["AUC"] = calc_auc(data_meal["Libre GL"], 15)
+                data_meal["Carb"] = data["Carbs"][index] * 4
+                data_meal["Protein"] = data["Protein"][index] * 4
+                data_meal["Fat"] = data["Fat"][index] * 9
+                data_meal["Fiber"] = data["Fiber"][index] * 2
+                data_meal["Calories"] = data["Calories"][index]
+                x = data["Meal Type"][index]
+                if x == "Breakfast" or x == "breakfast":
+                    data_meal["Meal Type"] = 1
+                elif x == "lunch" or x == "Lunch":
+                    data_meal["Meal Type"] = 2
+                else:
+                    data_meal["Meal Type"] = 3
+                # 先构造单行 DataFrame，清理全空（或全部为 NaN）情况再合并
+                df_row = pd.DataFrame([data_meal])
+                # 如果整行都是 NA/空，则跳过，避免 concat 出现未来不兼容行为
+                if df_row.dropna(how="all", axis=1).shape[1] == 0:
+                    continue
+                data_sub = pd.concat([data_sub, df_row], ignore_index=True)
+            if data_sub["Carb"].iloc[0] == 24 and data_sub["Protein"].iloc[0] == 22 and data_sub["Fat"].iloc[0] == 10.5 and data_sub["Fiber"].iloc[0] == 0.0:
+                data_sub = data_sub.iloc[1:]
+            # 若 data_sub 为空则跳过合并，避免 concat 警告/类型不确定
+            if not data_sub.empty:
+                data_all_sub = pd.concat([data_all_sub, data_sub], ignore_index=True)
+        # print(data_all_sub)
+        data_all_sub = data_all_sub[data_all_sub["iAUC"] > 0]
+        data_all_sub.reset_index(inplace=True)
+
+        # 记录病人数据
+        df = pd.read_csv("bio.csv")
+        a1c = df["A1c PDL (Lab)"].dropna().to_numpy()
+        fasting_glucose = df["Fasting GLU - PDL (Lab)"].dropna().to_numpy()
+        fasting_insulin = df["Insulin "].dropna().to_numpy() # in uIU/mL (ideal range: 2.6 - 24.9)
+        fasting_insulin = [float(str(x).strip(' (low)')) for x in fasting_insulin]
+
+        HOMA = (fasting_insulin * fasting_glucose)/405
+
+        tg = df["Triglycerides"].dropna().to_numpy()
+        cholesterol = df["Cholesterol"].dropna().to_numpy()
+        HDL = df["HDL"].dropna().to_numpy()
+        non_HDL = df["Non HDL "].dropna().to_numpy()
+        ldl = df["LDL (Cal)"].dropna().to_numpy()
+        vldl = df["VLDL (Cal)"].dropna().to_numpy()
+        cho_hdl_ratio = df["Cho/HDL Ratio"].dropna().to_numpy()
+
+        patients = []
+        for i in range(len(a1c)):
+            if a1c[i] < 5.7:
+                patients.append("H")
+            if a1c[i] >= 5.7 and a1c[i] <=6.4:
+                patients.append("P")
+            if a1c[i] > 6.4:
+                patients.append("T2D")
+        patients = np.array(patients)
+        h_index = np.where(patients == "H")[0]
+        p_index = np.where(patients == "P")[0]
+        t_index = np.where(patients == "T2D")[0]
+
+        weights = df["Body weight "].dropna().to_numpy()
+        heights = df["Height "].dropna().to_numpy()
+        weight_kg = weights * 0.453592
+        total_heights = []    
+        for i in range(len(heights)):
+            inches = heights[i]
+            h = float(inches)
+            total_heights.append(h * 0.0254)
+        BMI = []
+        for height, weight in zip(total_heights, weight_kg):
+            bmi = weight/(height**2)
+            BMI.append(bmi)
+        BMI = np.array(BMI)
+
+        age = df["Age"].to_numpy()
+        gender = df["Gender"].to_list()
+        gender = [1 if x == 'M'  else -1 for x in gender]
+
+        libre_data = data_all_sub["Libre GL"]
+        interp_gl = []
+        for i in range(len(data_all_sub["Libre GL"])):
+            interp_gl.append(data_all_sub["Libre GL"][i][0])
+        data_all_sub["Baseline_Libre"] = interp_gl
+
+        subjects = data_all_sub["sub"].unique()
+
+        new_age = []
+        new_weight = []
+        new_height = []
+        new_gender = []
+        new_BMI = []
+        new_a1c = []
+        new_HOMA = []
+        new_fasting_insulin = []
+        new_tg = []
+        new_cholestrol = []
+        new_HDL = []
+        new_non_HDL = []
+        new_ldl = []
+        new_vldl = []
+        new_cho_hdl_ratio = []
+        new_fasting_glucose = []
+
+        for i in range(len(subjects)):
+            match_length = len(data_all_sub[data_all_sub["sub"] == subjects[i]])
+            new_age.extend([age[i]] * match_length)
+            new_weight.extend([weight_kg[i]] * match_length)
+            new_height.extend([total_heights[i]] * match_length)
+            new_gender.extend([gender[i]] * match_length)
+            new_BMI.extend([BMI[i]] * match_length)
+            new_a1c.extend([a1c[i]] * match_length)
+            new_HOMA.extend([HOMA[i]] * match_length)
+            new_fasting_insulin.extend([fasting_insulin[i]] * match_length)
+            new_tg.extend([tg[i]] * match_length)
+            new_cholestrol.extend([cholesterol[i]] * match_length)
+            new_HDL.extend([HDL[i]] * match_length)
+            new_non_HDL.extend([non_HDL[i]] * match_length)
+            new_ldl.extend([ldl[i]] * match_length)
+            new_vldl.extend([vldl[i]] * match_length)
+            new_cho_hdl_ratio.extend([cho_hdl_ratio[i]] * match_length)
+            new_fasting_glucose.extend([fasting_glucose[i]] * match_length)
+
+
+        data_all_sub["Age"] = new_age
+        data_all_sub['Weight'] = new_weight
+        data_all_sub['Height'] = new_height
+        data_all_sub["Gender"] = new_gender
+        data_all_sub["BMI"] = new_BMI
+        data_all_sub["A1c"] = new_a1c
+        data_all_sub["HOMA"] = new_HOMA
+        data_all_sub["Insulin"] = new_fasting_insulin
+        data_all_sub["TG"] = new_tg
+        data_all_sub["Cholesterol"] = new_cholestrol
+        data_all_sub["HDL"] = new_HDL
+        data_all_sub["Non HDL"] = new_non_HDL
+        data_all_sub["LDL"] = new_ldl
+        data_all_sub["VLDL"] = new_vldl
+        data_all_sub["CHO/HDL ratio"] = new_cho_hdl_ratio
+        data_all_sub["Fasting BG"] = new_fasting_glucose
+
+        data_all_sub["Carbs"] = data_all_sub["Carb"] * 4
+        data_all_sub["Protein"] = data_all_sub["Protein"] * 4
+        data_all_sub["Fats"] = data_all_sub["Fat"] * 9
+        data_all_sub["Fiber"] = data_all_sub["Fiber"] * 2
+        data_all_sub["Net Carb"] = data_all_sub["Carb"] - data_all_sub["Fiber"]
+        
+        data_all_sub.drop('Libre GL', axis=1, inplace=True)
+        data_all_sub.to_csv("data_all_sub.csv")
+    
+    return data_all_sub
+
 
 def construct_vector_store(embeddings):
     # 定义集合名称和向量维度
@@ -427,6 +626,8 @@ def format_patient_info(patient_data):
     info = f"""
     年龄：{patient_data['Age']}岁
     性别：{gender}
+    身高：{patient_data['Height']}米
+    体重：{patient_data['Weight']}kg
     BMI：{patient_data['BMI']:.1f}
     空腹血糖基线：{patient_data['Baseline_Libre']:.1f} mg/dL
     糖化血红蛋白：{patient_data['A1c']:.1f}%
