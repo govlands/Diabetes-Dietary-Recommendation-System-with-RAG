@@ -34,17 +34,22 @@ def areaUnderCurve(a, b):
         total = total + temp
     return total
 
+
 def calc_iauc(cgm, sampling_interval):
     a = []
     for i in range(len(cgm)):
         a.append(i * sampling_interval[i])
     return areaUnderCurve(a, cgm)
 
+
 def calc_auc(cgm, sampling_interval):
     return np.trapz(cgm, dx=sampling_interval)
 
-def get_data_all_sub(path:str):
-    os.chdir(path=path)
+
+def get_data_all_sub():
+    original_dir = os.getcwd()
+    data_dir = original_dir + '/cgmacros1.0/CGMacros'
+    os.chdir(path=data_dir)
     # 构建data_all_sub(训练集)
     if os.path.exists("data_all_sub.csv"):
         data_all_sub = pd.read_csv("data_all_sub.csv")
@@ -59,7 +64,7 @@ def get_data_all_sub(path:str):
             data = pd.read_csv(os.path.join(sub, sub+'.csv'))
             # print(data)
             data_sub = pd.DataFrame(columns = ["sub", "Libre GL", "Meal Type", "Carb", "Protein", "Fat", "Fiber"])    
-            for index in data[(data["Meal Type"] == "Breakfast") | (data["Meal Type"] == "breakfast") | (data["Meal Type"] == "Lunch") | (data["Meal Type"] == "lunch") | (data["Meal Type"] == "Dinner") | (data["Meal Type"] == "dinner")].index:
+            for index in data[(data["Meal Type"] == "Breakfast") | (data["Meal Type"] == "breakfast") | (data["Meal Type"] == "Lunch") | (data["Meal Type"] == "lunch") | (data["Meal Type"] == "Dinner") | (data["Meal Type"] == "dinner") | (data["Meal Type"] == "Snacks") | (data["Meal Type"] == "snacks")].index:
                 data_meal = {}
                 data_meal["sub"] = sub[-3:]
                 data_meal["Libre GL"] = data["Libre GL"][index:index+135:15].to_list()
@@ -77,8 +82,10 @@ def get_data_all_sub(path:str):
                     data_meal["Meal Type"] = 1
                 elif x == "lunch" or x == "Lunch":
                     data_meal["Meal Type"] = 2
-                else:
+                elif x == "Dinner" or x == "Dinner":
                     data_meal["Meal Type"] = 3
+                else:
+                    data_meal["Meal Type"] = 4
                 # 先构造单行 DataFrame，清理全空（或全部为 NaN）情况再合并
                 df_row = pd.DataFrame([data_meal])
                 # 如果整行都是 NA/空，则跳过，避免 concat 出现未来不兼容行为
@@ -213,7 +220,22 @@ def get_data_all_sub(path:str):
         data_all_sub.drop('Libre GL', axis=1, inplace=True)
         data_all_sub.to_csv("data_all_sub.csv")
     
+    os.chdir(original_dir)
     return data_all_sub
+
+
+def fetch_dataset_from_cgmacros(meal_type:int):
+    data_all_sub = get_data_all_sub()
+    feature_cols = ['Carbs', 'Protein', 'Fat', 'Fiber', 'Baseline_Libre', 'Age', 'Gender', 'BMI', 'A1c', 'HOMA', 'Insulin', 'TG', 'Cholesterol',
+                   'HDL', 'Non HDL', 'LDL', 'VLDL', 'CHO/HDL ratio', 'Fasting BG']
+    if meal_type in [1,2,3,4]:
+        mask = data_all_sub["Meal Type"] == meal_type
+        X_all = data_all_sub.loc[mask, feature_cols].to_numpy()
+        y_all = data_all_sub.loc[mask, 'iAUC'].to_numpy()
+    else:
+        X_all = data_all_sub.loc[:, feature_cols].to_numpy()
+        y_all = data_all_sub.loc[:, 'iAUC'].to_numpy()
+    return X_all, y_all
 
 
 def construct_vector_store(embeddings):

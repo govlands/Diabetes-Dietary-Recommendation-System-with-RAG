@@ -9,7 +9,7 @@ from utils import *
 
 
 def fetch_infos_from_cgmacros(n_infos:int=1):
-    data_all_sub = get_data_all_sub(data_dir)
+    data_all_sub = get_data_all_sub()
     feature_cols = ['Baseline_Libre', 'Age', 'Weight', 'Height', 'Gender', 
                     'BMI', 'A1c', 'HOMA', 'Insulin', 'TG', 'Cholesterol', 'HDL', 'Non HDL', 
                     'LDL', 'VLDL', 'CHO/HDL ratio', 'Fasting BG']

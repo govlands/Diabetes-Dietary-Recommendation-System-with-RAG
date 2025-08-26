@@ -1,8 +1,7 @@
 from functools import partial
 import numpy as np
-import sklearn.datasets
 import torch
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import mean_absolute_error, root_mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 from torch.optim import Adam
 from torch.utils.data import DataLoader
@@ -13,20 +12,14 @@ from tabpfn import TabPFNRegressor
 from tabpfn.finetune_utils import clone_model_for_evaluation
 from tabpfn.utils import meta_dataset_collator
 
-from utils import get_data_all_sub
+from utils import *
 import os
-
+from scipy.stats import pearsonr
 
 def prepare_data(config: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Loads, subsets, and splits the California Housing dataset."""
     print("--- 1. Data Preparation ---")
-    data_all_sub = get_data_all_sub('cgmacros1.0/CGMacros')
-    feature_cols = ['Carbs', 'Protein', 'Fat', 'Fiber', 'Baseline_Libre', 'Age', 'Gender', 'BMI', 'A1c', 'HOMA', 'Insulin', 'TG', 'Cholesterol',
-                   'HDL', 'Non HDL', 'LDL', 'VLDL', 'CHO/HDL ratio', 'Fasting BG']
-    meal_type = 1
-    mask = data_all_sub["Meal Type"] == meal_type
-    X_all = data_all_sub.loc[mask, feature_cols].to_numpy()
-    y_all = data_all_sub.loc[mask, 'iAUC'].to_numpy()
+    X_all, y_all = fetch_dataset_from_cgmacros(config['meal_type'])
 
     rng = np.random.default_rng(config["random_seed"])
     num_samples_to_use = min(config["num_samples_to_use"], len(y_all))
@@ -73,21 +66,22 @@ def evaluate_regressor(
     y_train: np.ndarray,
     X_test: np.ndarray,
     y_test: np.ndarray,
-) -> tuple[float, float, float]:
+) -> tuple[float, float, float, float]:
     """Evaluates the regressor's performance on the test set."""
     eval_regressor = clone_model_for_evaluation(regressor, eval_config, TabPFNRegressor)
     eval_regressor.fit(X_train, y_train)
 
     try:
         predictions = eval_regressor.predict(X_test)
-        mse = mean_squared_error(y_test, predictions)
+        rmse = root_mean_squared_error(y_test, predictions)
         mae = mean_absolute_error(y_test, predictions)
         r2 = r2_score(y_test, predictions)
+        r = pearsonr(y_test, predictions)[0]
     except Exception as e:
         print(f"An error occurred during evaluation: {e}")
-        mse, mae, r2 = np.nan, np.nan, np.nan
+        rmse, mae, r2, r = np.nan, np.nan, np.nan
 
-    return mse, mae, r2
+    return rmse, mae, r2, r
 
 
 def main() -> None:
@@ -98,6 +92,7 @@ def main() -> None:
     # --- Master Configuration ---
     # This improved structure separates general settings from finetuning hyperparameters.
     config = {
+        "meal_type": 5,
         # Sets the computation device ('cuda' for GPU if available, otherwise 'cpu').
         "device": "cuda" if torch.cuda.is_available() else "cpu",
         # The total number of samples to draw from the full dataset. This is useful for
@@ -202,13 +197,13 @@ def main() -> None:
                 progress_bar.set_postfix(loss=f"{loss.item():.4f}")
 
         # Evaluation Step (runs before finetuning and after each epoch)
-        mse, mae, r2 = evaluate_regressor(
+        rmse, mae, r2, r = evaluate_regressor(
             regressor, eval_config, X_train, y_train, X_test, y_test
         )
 
         status = "Initial" if epoch == 0 else f"Epoch {epoch}"
         print(
-            f"📊 {status} Evaluation | Test MSE: {mse:.4f}, Test MAE: {mae:.4f}, Test R2: {r2:.4f}\n"
+            f"📊 {status} Evaluation | Test RMSE: {rmse:.4f}, Test MAE: {mae:.4f}, Test R2: {r2:.4f}\n, Test R: {r:.4f}"
         )
 
     print("--- ✅ Finetuning Finished ---")
