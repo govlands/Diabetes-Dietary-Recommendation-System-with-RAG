@@ -18,6 +18,7 @@ import requests
 from typing import Optional
 import numpy as np
 import pandas as pd
+from datetime import datetime
 
 def areaUnderCurve(a, b):
     total = 0
@@ -228,13 +229,15 @@ def fetch_dataset_from_cgmacros(meal_type:int):
     data_all_sub = get_data_all_sub()
     feature_cols = ['Carbs', 'Protein', 'Fat', 'Fiber', 'Baseline_Libre', 'Age', 'Gender', 'BMI', 'A1c', 'HOMA', 'Insulin', 'TG', 'Cholesterol',
                    'HDL', 'Non HDL', 'LDL', 'VLDL', 'CHO/HDL ratio', 'Fasting BG']
-    if meal_type in [1,2,3,4]:
+
+    if meal_type in [1, 2, 3, 4]:
         mask = data_all_sub["Meal Type"] == meal_type
         X_all = data_all_sub.loc[mask, feature_cols].to_numpy()
-        y_all = data_all_sub.loc[mask, 'iAUC'].to_numpy()
+        y_all = data_all_sub.loc[mask, "iAUC"].to_numpy()
     else:
         X_all = data_all_sub.loc[:, feature_cols].to_numpy()
-        y_all = data_all_sub.loc[:, 'iAUC'].to_numpy()
+        y_all = data_all_sub.loc[:, "iAUC"].to_numpy()
+
     return X_all, y_all
 
 
@@ -666,3 +669,7 @@ def format_patient_info(patient_data):
     """
     return info
 
+
+def get_save_path(parent_dir:str, name:str, postfix:str):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"{parent_dir}/{name}_{timestamp}.{postfix}"

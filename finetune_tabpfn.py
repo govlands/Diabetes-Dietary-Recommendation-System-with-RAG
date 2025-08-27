@@ -1,6 +1,7 @@
 from functools import partial
 import numpy as np
 import torch
+import torch.nn.utils
 from sklearn.metrics import mean_absolute_error, root_mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 from torch.optim import Adam
@@ -15,6 +16,43 @@ from tabpfn.utils import meta_dataset_collator
 from utils import *
 import os
 from scipy.stats import pearsonr
+from datetime import datetime
+import json
+
+
+class EarlyStopping:
+    """Early stopping utility to stop training when validation metric stops improving."""
+    
+    def __init__(self, patience=3, min_delta=0.001, metric="rmse", mode="min"):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.metric = metric
+        self.mode = mode
+        self.best_score = None
+        self.counter = 0
+        self.early_stop = False
+        self.best_epoch = 0
+        
+    def __call__(self, score, epoch):
+        if self.best_score is None:
+            self.best_score = score
+            self.best_epoch = epoch
+        elif self._is_improvement(score):
+            self.best_score = score
+            self.best_epoch = epoch
+            self.counter = 0
+        else:
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.early_stop = True
+                
+        return self.early_stop
+    
+    def _is_improvement(self, score):
+        if self.mode == "min":
+            return score < self.best_score - self.min_delta
+        else:  # mode == "max"
+            return score > self.best_score + self.min_delta
 
 def prepare_data(config: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Loads, subsets, and splits the California Housing dataset."""
@@ -44,9 +82,10 @@ def setup_regressor(config: dict) -> tuple[TabPFNRegressor, dict]:
     """Initializes the TabPFN regressor and its configuration."""
     print("--- 2. Model Setup ---")
     regressor_config = {
+        'categorical_features_indices': [6],
         "ignore_pretraining_limits": True,
         "device": config["device"],
-        "n_estimators": 2,
+        "n_estimators": config['n_estimators'],
         "random_state": config["random_seed"],
         "inference_precision": torch.float32,
     }
@@ -92,7 +131,8 @@ def main() -> None:
     # --- Master Configuration ---
     # This improved structure separates general settings from finetuning hyperparameters.
     config = {
-        "meal_type": 5,
+        "meal_type": 1,
+        'n_estimators': 8,
         # Sets the computation device ('cuda' for GPU if available, otherwise 'cpu').
         "device": "cuda" if torch.cuda.is_available() else "cpu",
         # The total number of samples to draw from the full dataset. This is useful for
@@ -111,7 +151,7 @@ def main() -> None:
     }
     config["finetuning"] = {
         # The total number of passes through the entire fine-tuning dataset.
-        "epochs": 8,
+        "epochs": 10,
         # A small learning rate is crucial for fine-tuning to avoid catastrophic forgetting.
         "learning_rate": 1.5e-6,
         # Meta Batch size for finetuning, i.e. how many datasets per batch. Must be 1 currently.
@@ -124,6 +164,18 @@ def main() -> None:
                 config["num_samples_to_use"] * (1 - config["valid_set_ratio"]),
             )
         ),
+        # Early stopping configuration
+        "early_stopping": {
+            "patience": 3,  # Number of epochs to wait before stopping
+            "min_delta": 0.001,  # Minimum change to qualify as an improvement
+            "metric": "rmse",  # Metric to monitor ('rmse', 'mae', 'r2')
+            "mode": "min",  # 'min' for rmse/mae, 'max' for r2
+        },
+        # Gradient clipping configuration
+        "gradient_clipping": {
+            "max_norm": 1.0,  # Maximum norm for gradients
+            "norm_type": 2,  # Type of norm (2 for L2 norm)
+        },
     }
 
     # --- Setup Data, Model, and Dataloader ---
@@ -159,10 +211,28 @@ def main() -> None:
 
     # --- Finetuning and Evaluation Loop ---
     print("--- 3. Starting Finetuning & Evaluation ---")
+    
+    # Initialize early stopping
+    early_stopping_config = config["finetuning"]["early_stopping"]
+    early_stopping = EarlyStopping(
+        patience=early_stopping_config["patience"],
+        min_delta=early_stopping_config["min_delta"],
+        metric=early_stopping_config["metric"],
+        mode=early_stopping_config["mode"]
+    )
+    
+    # Gradient clipping config
+    grad_clip_config = config["finetuning"]["gradient_clipping"]
+    
+    # Track metrics for early stopping
+    metrics_history = []
+    
     for epoch in range(config["finetuning"]["epochs"] + 1):
         if epoch > 0:
             # Create a tqdm progress bar to iterate over the dataloader
             progress_bar = tqdm(finetuning_dataloader, desc=f"Finetuning Epoch {epoch}")
+            epoch_losses = []
+            
             for data_batch in progress_bar:
                 optimizer.zero_grad()
                 (
@@ -190,11 +260,31 @@ def main() -> None:
                 y_target = y_test_znorm
 
                 loss = loss_fn(logits, y_target.to(config["device"])).mean()
+                
+                # Check for numeric instability
+                if torch.isnan(loss) or torch.isinf(loss):
+                    print(f"Warning: Invalid loss detected at epoch {epoch}: {loss.item()}")
+                    continue
+                
                 loss.backward()
+                
+                # Apply gradient clipping
+                torch.nn.utils.clip_grad_norm_(
+                    regressor.model_.parameters(),
+                    max_norm=grad_clip_config["max_norm"],
+                    norm_type=grad_clip_config["norm_type"]
+                )
+                
                 optimizer.step()
-
+                
+                epoch_losses.append(loss.item())
                 # Set the postfix of the progress bar to show the current loss
                 progress_bar.set_postfix(loss=f"{loss.item():.4f}")
+            
+            # Log average epoch loss
+            if epoch_losses:
+                avg_loss = np.mean(epoch_losses)
+                print(f"Epoch {epoch} - Average Loss: {avg_loss:.4f}")
 
         # Evaluation Step (runs before finetuning and after each epoch)
         rmse, mae, r2, r = evaluate_regressor(
@@ -203,10 +293,71 @@ def main() -> None:
 
         status = "Initial" if epoch == 0 else f"Epoch {epoch}"
         print(
-            f"📊 {status} Evaluation | Test RMSE: {rmse:.4f}, Test MAE: {mae:.4f}, Test R2: {r2:.4f}\n, Test R: {r:.4f}"
+            f"📊 {status} Evaluation | Test RMSE: {rmse:.4f}, Test MAE: {mae:.4f}, Test R2: {r2:.4f}, Test R: {r:.4f}"
         )
+        
+        # Store metrics for history
+        metrics_dict = {"epoch": epoch, "rmse": rmse, "mae": mae, "r2": r2, "r": r}
+        metrics_history.append(metrics_dict)
+        
+        # Early stopping check (skip for initial evaluation)
+        if epoch > 0:
+            # Get the metric to monitor
+            monitor_metric = metrics_dict[early_stopping_config["metric"]]
+            
+            # Check early stopping
+            if early_stopping(monitor_metric, epoch):
+                print(f"🛑 Early stopping triggered at epoch {epoch}")
+                print(f"Best {early_stopping_config['metric']}: {early_stopping.best_score:.4f} at epoch {early_stopping.best_epoch}")
+                break
 
     print("--- ✅ Finetuning Finished ---")
+    # --- 4. Save logs and final model ---
+    print("--- 4. Saving Model and Logs ---")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    logs_dir = os.path.join(original_dir, "logs")
+    models_dir = os.path.join(original_dir, "models")
+    os.makedirs(logs_dir, exist_ok=True)
+    os.makedirs(models_dir, exist_ok=True)
+    
+    config['timestamp'] = timestamp
+    config['regressor_config'] = regressor_config
+    config['final_metrics'] = {"rmse": float(rmse), "mae": float(mae), "r2": float(r2), "r": float(r)}
+    config['early_stopping'] = {
+        "triggered": early_stopping.early_stop,
+        "best_epoch": early_stopping.best_epoch,
+        "best_score": early_stopping.best_score,
+        "final_epoch": len(metrics_history) - 1,
+    }
+    config['metrics_history'] = metrics_history
+    
+    metadata = config
+
+    log_path = os.path.join(logs_dir, f"finetune_log_{timestamp}.json")
+    try:
+        with open(log_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2, ensure_ascii=False, default=str)
+        print(f"Saved finetune log to: {log_path}")
+    except Exception as e:
+        print(f"Failed to save finetune log: {e}")
+
+    # Save model: state_dict and optimizer state for reproducibility
+    model_state_path = os.path.join(models_dir, f"tabpfn_model_state_{timestamp}.pt")
+    try:
+        torch.save(
+            {
+                "model_state_dict": regressor.model_.state_dict(),
+                "regressor_config": regressor_config,
+                "optimizer_state_dict": optimizer.state_dict(),
+                "metadata": metadata,
+                "datasets": (X_train, X_test, y_train, y_test)
+            },
+            model_state_path,
+        )
+        print(f"Saved model state to: {model_state_path}")
+    except Exception as e:
+        print(f"Failed to save model: {e}")
+
 
 
 if __name__ == "__main__":
