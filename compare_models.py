@@ -1,7 +1,6 @@
 import torch
 import numpy as np
 from tabpfn import TabPFNRegressor
-import json
 import os
 from xgboost import XGBRegressor
 from catboost import CatBoostRegressor
@@ -52,10 +51,10 @@ def load_models(path=None, device=DEVICE, X_sample=None, y_sample=None):
     # ensure device set
     reg_config["device"] = device
     # create finetuned_reg with same config; this mirrors how it was instantiated in training
-    finetuned_reg = TabPFNRegressor(**reg_config, fit_mode="batched", differentiable_input=False)
+    finetuned_reg = TabPFNRegressor(**reg_config, fit_mode="fit_preprocessors", differentiable_input=False)
     origin_config = dict(reg_config)
     origin_config['n_estimators'] = 1
-    origin_reg = TabPFNRegressor(**origin_config, fit_mode="batched", differentiable_input=False)
+    origin_reg = TabPFNRegressor(**origin_config, fit_mode="fit_preprocessors", differentiable_input=False)
     # load saved state dict into internal model; ensure model_ exists first
     model_state = data.get("model_state_dict")
     if model_state is not None:

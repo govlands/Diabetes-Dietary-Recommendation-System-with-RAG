@@ -1,23 +1,12 @@
 from tabpfgen import TabPFGen
-from tabpfgen.visuals import visualize_regression_results
-from sklearn.datasets import load_diabetes
 import os
-import pickle
 import matplotlib.pyplot as plt
-import sklearn
 import pandas as pd
 import numpy as np
-from scipy.stats import zscore
 from scipy.stats import pearsonr
-import xgboost as xgb
-from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import root_mean_squared_error, r2_score, mean_absolute_error
-from xgboost import XGBRegressor
 from catboost import CatBoostRegressor
-from sklearn.ensemble import RandomForestRegressor
-from tabpfn_client import TabPFNRegressor, init
-from sklearn.model_selection import GridSearchCV, KFold, cross_val_score, RandomizedSearchCV, GroupShuffleSplit
-import scipy
+from tabpfn import TabPFNRegressor
 import warnings
 import numpy as np
 from pred_iauc import get_data_all_sub
@@ -29,7 +18,6 @@ if __name__ == "__main__":
     warnings.filterwarnings("ignore", category=FutureWarning)
     os.chdir("cgmacros1.0/CGMacros")
     pd.set_option('display.max_rows', None)
-    init()
     
     # Initialize generator
     generator = TabPFGen(n_sgld_steps=500, device='auto')
