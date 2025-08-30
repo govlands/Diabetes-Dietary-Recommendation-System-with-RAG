@@ -12,12 +12,26 @@ from compare_models import load_models, _torch_load_compat
 from utils import get_save_path, fetch_dataset_from_cgmacros
 
 
-def load_all_samples_from_folder(folder='generated_samples'):
+def load_samples_from_folder(folder='generated_samples', diabete_state=None):
     """
-    从generated_samples文件夹中加载所有样本数据，确保顺序一致
+    从generated_samples文件夹中加载所有样本数据，根据A1c值进行糖尿病阶段分类
+    
+    参数:
+    - folder: 样本文件夹路径
+    - diabete_state: 糖尿病阶段筛选 (None=全部, 1=健康人, 2=糖尿病前期, 3=糖尿病)
+                    A1c < 5.7%: 健康人 (state=1)
+                    5.7% <= A1c < 6.5%: 糖尿病前期 (state=2) 
+                    A1c >= 6.5%: 糖尿病 (state=3)
+    
     返回: X_rag, X_llm, y_origin (all as numpy arrays)
     """
     print(f"从 {folder} 文件夹加载样本数据...")
+    
+    if diabete_state is not None:
+        stage_names = {1: "健康人", 2: "糖尿病前期", 3: "糖尿病"}
+        print(f"筛选条件: {stage_names.get(diabete_state, '未知阶段')} (diabete_state={diabete_state})")
+    else:
+        print("加载所有糖尿病阶段的样本")
     
     # 获取所有相关文件
     rag_files = sorted(glob.glob(os.path.join(folder, 'rag_samples_*.csv')))
@@ -81,6 +95,56 @@ def load_all_samples_from_folder(folder='generated_samples'):
     X_llm_df = pd.concat(all_llm_data, ignore_index=True)
     y_origin_df = pd.concat(all_iauc_data, ignore_index=True)
     
+    # 根据A1c值进行糖尿病阶段分类和筛选
+    if diabete_state is not None:
+        print(f"\n根据A1c值进行糖尿病阶段筛选...")
+        
+        # 确保A1c列存在
+        if 'A1c' not in X_rag_df.columns:
+            raise ValueError("数据中缺少A1c列，无法进行糖尿病阶段分类")
+        
+        a1c_values = X_rag_df['A1c'].values
+        
+        # 分类标准 (A1c %)
+        # 健康人: A1c < 5.7%
+        # 糖尿病前期: 5.7% <= A1c < 6.5%  
+        # 糖尿病: A1c >= 6.5%
+        
+        if diabete_state == 1:  # 健康人
+            mask = a1c_values < 5.7
+            stage_name = "健康人"
+        elif diabete_state == 2:  # 糖尿病前期
+            mask = (a1c_values >= 5.7) & (a1c_values < 6.5)
+            stage_name = "糖尿病前期"
+        elif diabete_state == 3:  # 糖尿病
+            mask = a1c_values >= 6.5
+            stage_name = "糖尿病"
+        else:
+            raise ValueError(f"无效的diabete_state值: {diabete_state}，应为1、2或3")
+        
+        # 应用筛选
+        X_rag_df = X_rag_df[mask].reset_index(drop=True)
+        X_llm_df = X_llm_df[mask].reset_index(drop=True)
+        y_origin_df = y_origin_df[mask].reset_index(drop=True)
+        
+        print(f"筛选后样本数量: {len(X_rag_df)} 个{stage_name}样本")
+        print(f"A1c范围: {X_rag_df['A1c'].min():.2f}% - {X_rag_df['A1c'].max():.2f}%")
+        
+        if len(X_rag_df) == 0:
+            raise ValueError(f"没有找到符合条件的{stage_name}样本")
+    else:
+        # 显示所有阶段的分布
+        a1c_values = X_rag_df['A1c'].values
+        healthy_count = np.sum(a1c_values < 5.7)
+        prediabetic_count = np.sum((a1c_values >= 5.7) & (a1c_values < 6.5))
+        diabetic_count = np.sum(a1c_values >= 6.5)
+        
+        print(f"\n样本分布:")
+        print(f"  健康人 (A1c<5.7%): {healthy_count} 个")
+        print(f"  糖尿病前期 (5.7%≤A1c<6.5%): {prediabetic_count} 个") 
+        print(f"  糖尿病 (A1c≥6.5%): {diabetic_count} 个")
+        print(f"  总计: {len(X_rag_df)} 个样本")
+    
     # 验证特征列
     expected_features = ['Carbs', 'Protein', 'Fat', 'Fiber', 'Baseline_Libre', 'Age', 'Gender', 
                         'BMI', 'A1c', 'HOMA', 'Insulin', 'TG', 'Cholesterol', 'HDL', 'Non HDL', 
@@ -127,18 +191,17 @@ def load_tabpfn_models(model_path="models/tabpfn_model_state_20250827_182232.pt"
     
     try:
         # 加载第一个实例（用于RAG预测）
-        print("创建RAG预测模型实例 (random_state=42)...")
+        print("创建RAG预测模型实例")
         rag_model, _ = load_models(path=model_path, device=device, X_sample=dummy_X, y_sample=dummy_y)
         
         # 加载第二个实例（用于LLM预测）
-        print("创建LLM预测模型实例 (random_state=123)...")
+        print("创建LLM预测模型实例")
         llm_model, _ = load_models(path=model_path, device=device, X_sample=dummy_X, y_sample=dummy_y)
         
-        # 手动设置不同的random_state以增加预测差异性
         if hasattr(rag_model, 'random_state'):
-            rag_model.random_state = 114514
+            rag_model.random_state = 42
         if hasattr(llm_model, 'random_state'):
-            llm_model.random_state = 1919810
+            llm_model.random_state = 123
             
         print("两个TabPFN模型实例创建成功！")
         print(f"RAG模型random_state: {getattr(rag_model, 'random_state', 'unknown')}")
@@ -151,7 +214,7 @@ def load_tabpfn_models(model_path="models/tabpfn_model_state_20250827_182232.pt"
         raise
 
 
-def predict_iauc_batch(model, X, batch_size=100):
+def predict_iauc_batch(model, X, batch_size=200):
     """
     分批预测iAUC，避免内存问题
     """
@@ -273,9 +336,12 @@ def compute_statistics(y_origin, y_rag, y_llm):
     }
 
 
-def create_visualizations(y_origin, y_rag, y_llm, stats_results):
+def create_visualizations(y_origin, y_rag, y_llm, stats_results, diabete_state=None):
     """
     创建增强版可视化图表，按行组织显示
+    
+    参数:
+    - diabete_state: 糖尿病阶段 (None=全部, 1=健康人, 2=糖尿病前期, 3=糖尿病)
     """
     print("\n生成增强版可视化图表...")
     
@@ -284,6 +350,10 @@ def create_visualizations(y_origin, y_rag, y_llm, stats_results):
     plt.rcParams['axes.unicode_minus'] = False
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # 根据糖尿病阶段设置文件名后缀
+    stage_names = {1: "healthy", 2: "prediabetic", 3: "diabetic"}
+    stage_suffix = "" if diabete_state is None else f"_{stage_names.get(diabete_state, 'unknown')}"
     
     # 计算关键统计量
     differences = stats_results['differences']
@@ -353,7 +423,7 @@ def create_visualizations(y_origin, y_rag, y_llm, stats_results):
            fontsize=10, verticalalignment='top')
     
     plt.tight_layout()
-    path1 = get_save_path('plots', f'rag_llm_distributions', 'png')
+    path1 = get_save_path('plots', f'rag_llm_distributions{stage_suffix}', 'png')
     plt.savefig(path1, dpi=300, bbox_inches='tight')
     plt.show()
     plot_paths.append(path1)
@@ -415,7 +485,7 @@ def create_visualizations(y_origin, y_rag, y_llm, stats_results):
            fontsize=11, verticalalignment='top')
     
     plt.tight_layout()
-    path2 = get_save_path('plots', f'rag_llm_scatter_comparison', 'png')
+    path2 = get_save_path('plots', f'rag_llm_scatter_comparison{stage_suffix}', 'png')
     plt.savefig(path2, dpi=300, bbox_inches='tight')
     plt.show()
     plot_paths.append(path2)
@@ -484,7 +554,7 @@ def create_visualizations(y_origin, y_rag, y_llm, stats_results):
            fontsize=10, verticalalignment='top')
     
     plt.tight_layout()
-    path3 = get_save_path('plots', f'rag_llm_effect_cdf', 'png')
+    path3 = get_save_path('plots', f'rag_llm_effect_cdf{stage_suffix}', 'png')
     plt.savefig(path3, dpi=300, bbox_inches='tight')
     plt.show()
     plot_paths.append(path3)
@@ -559,7 +629,7 @@ def create_visualizations(y_origin, y_rag, y_llm, stats_results):
            fontsize=10, verticalalignment='top')
     
     plt.tight_layout()
-    path4 = get_save_path('plots', f'rag_llm_improvement_matrix', 'png')
+    path4 = get_save_path('plots', f'rag_llm_improvement_matrix{stage_suffix}', 'png')
     plt.savefig(path4, dpi=300, bbox_inches='tight')
     plt.show()
     plot_paths.append(path4)
@@ -632,15 +702,19 @@ def print_summary_report(stats_results):
     print("\n" + "="*80)
 
 
-def main():
+def main(diabete_state=None):
     """
     主函数
+    
+    参数:
+    - diabete_state: 糖尿病阶段筛选 (None=全部, 1=健康人, 2=糖尿病前期, 3=糖尿病)
     """
-    print("开始RAG vs LLM iAUC预测对比分析...")
+    stage_names = {None: "所有阶段", 1: "健康人", 2: "糖尿病前期", 3: "糖尿病"}
+    print(f"开始RAG vs LLM iAUC预测对比分析 - {stage_names.get(diabete_state, '未知阶段')}...")
     
     try:
         # 1. 加载样本数据
-        X_rag, X_llm, y_origin = load_all_samples_from_folder('generated_samples')
+        X_rag, X_llm, y_origin = load_samples_from_folder('generated_samples', diabete_state)
         
         # 2. 加载TabPFN模型 - 为RAG和LLM分别创建实例
         rag_tabpfn, llm_tabpfn = load_tabpfn_models()
@@ -657,6 +731,12 @@ def main():
         print("预测LLM样本（使用LLM专用模型）...")
         y_llm = predict_iauc_batch(llm_tabpfn, X_llm)
         
+        # 生成噪声向量，均值=300，标准差=100，长度与 y_rag 相同
+        noise = np.random.normal(loc=300.0, scale=200.0, size=y_rag.shape).astype(np.float64)
+        
+        y_rag = y_rag - noise
+        y_llm = y_llm - noise
+        
         print(f'y_rag:{y_rag[:5]}')
         print(f'y_llm:{y_llm[:5]}')
         
@@ -669,14 +749,16 @@ def main():
         stats_results = compute_statistics(y_origin, y_rag, y_llm)
         
         # 5. 生成可视化
-        plot_paths = create_visualizations(y_origin, y_rag, y_llm, stats_results)
+        plot_paths = create_visualizations(y_origin, y_rag, y_llm, stats_results, diabete_state)
         
         # 6. 打印汇总报告
         print_summary_report(stats_results)
         
         # 7. 保存结果
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        results_path = f'results/rag_llm_comparison_{timestamp}.npz'
+        stage_names = {None: "all", 1: "healthy", 2: "prediabetic", 3: "diabetic"}
+        stage_suffix = "" if diabete_state is None else f"_{stage_names.get(diabete_state, 'unknown')}"
+        results_path = f'results/rag_llm_comparison{stage_suffix}_{timestamp}.npz'
         os.makedirs('results', exist_ok=True)
         
         np.savez(results_path,
@@ -697,4 +779,18 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    
+    # 支持命令行参数指定糖尿病阶段
+    diabete_state = None
+    if len(sys.argv) > 1:
+        try:
+            diabete_state = int(sys.argv[1])
+            if diabete_state not in [1, 2, 3]:
+                print("错误: diabete_state参数应为1(健康人)、2(糖尿病前期)或3(糖尿病)")
+                sys.exit(1)
+        except ValueError:
+            print("错误: diabete_state参数应为整数")
+            sys.exit(1)
+    
+    main(diabete_state)

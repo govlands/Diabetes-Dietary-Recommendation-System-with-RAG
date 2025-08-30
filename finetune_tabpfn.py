@@ -131,8 +131,8 @@ def main() -> None:
     # --- Master Configuration ---
     # This improved structure separates general settings from finetuning hyperparameters.
     config = {
-        "meal_type": 1,
-        'n_estimators': 8,
+        "meal_type": 5,
+        'n_estimators': 4,
         # Sets the computation device ('cuda' for GPU if available, otherwise 'cpu').
         "device": "cuda" if torch.cuda.is_available() else "cpu",
         # The total number of samples to draw from the full dataset. This is useful for

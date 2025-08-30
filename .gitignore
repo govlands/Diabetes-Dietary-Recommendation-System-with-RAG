@@ -7,3 +7,5 @@ plots/*
 *.jpg
 *.png
 *.pdf
+*.npz
+results/*
